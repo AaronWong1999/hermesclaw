@@ -5,6 +5,10 @@
 **在同一个微信账号上同时跑 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 和 [OpenClaw](https://github.com/openclaw/openclaw)。一条命令安装。**
 
 <p align="center">
+  <img src="docs/HermesClaw.png" alt="HermesClaw — One WeChat bot. Two AI brains. /hermes, /openclaw, /both." style="max-width: 100%;" />
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python 3.8+">
   <img src="https://img.shields.io/badge/platform-WeChat-07c160.svg" alt="WeChat">
