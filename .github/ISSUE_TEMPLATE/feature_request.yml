@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest something HermesClaw could do
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        HermesClaw is intentionally minimal — please read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) before filing.
+        Features that belong inside Hermes Agent or OpenClaw should be filed in those repos instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      placeholder: "I want to ... but currently ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: How would HermesClaw help?
+      placeholder: "Add a /xxx command, or forward yyy as zzz, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you already tried or considered?
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This belongs in HermesClaw, not in Hermes Agent or OpenClaw
+          required: true

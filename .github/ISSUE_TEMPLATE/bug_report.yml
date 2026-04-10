@@ -1,0 +1,64 @@
+name: Bug report
+description: Something is broken in HermesClaw
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please include enough detail that someone else can reproduce it.
+
+  - type: input
+    id: version
+    attributes:
+      label: HermesClaw version / commit
+      placeholder: "v0.1.0 or git commit sha"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / distro
+      placeholder: "Ubuntu 22.04 ARM, macOS 14, Termux on Android, ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: route
+    attributes:
+      label: Active route when the bug happened
+      options:
+        - hermes
+        - openclaw
+        - both
+        - I was using a router command (/whoami, /hermes, /openclaw, /both)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what did you see instead?
+      placeholder: "I sent a voice message in /both mode, and ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        `sudo journalctl -u hermesclaw -n 100 --no-pager` is the most useful thing.
+        Please redact any tokens, user IDs, or message content you don't want public.
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: I have searched existing issues
+      options:
+        - label: I checked existing issues and didn't find a duplicate
+          required: true

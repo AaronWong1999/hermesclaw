@@ -305,10 +305,10 @@ def reply_wx_media(to, txt, media_path, media_label, ctx=None, emit_error_text=F
 
 def route_label(backend):
     if backend == B.HERMES:
-        return "Hermes Agent"
+        return "Hermes"
     if backend == B.OC:
         return "OpenClaw"
-    return "Both Hermes Agent & OpenClaw"
+    return "Hermes + OpenClaw"
 
 def hermes_health_summary(timeout=2):
     """Return a short Hermes health status string for user-facing diagnostics."""
@@ -505,20 +505,20 @@ def call_hermes(uid, txt, media_path=None, media_label=None):
 def cmd(uid, c):
     c = c.strip().lower()
     if c == "/hermes":
-        st.set(uid, B.HERMES); return "Switched to Hermes."
+        st.set(uid, B.HERMES); return "Switched to **Hermes**."
     if c == "/openclaw":
-        st.set(uid, B.OC); return "Switched to OpenClaw."
+        st.set(uid, B.OC); return "Switched to **OpenClaw**."
     if c == "/both":
-        st.set(uid, B.BOTH); return "Switched to both mode."
+        st.set(uid, B.BOTH); return "Switched to **Hermes + OpenClaw**."
     if c == "/whoami":
         backend = st.get(uid)
         return (
-            f"HermesClaw\n"
-            f"Current route: {route_label(backend)}\n"
-            f"/openclaw -> switch to OpenClaw\n"
-            f"/hermes -> switch to Hermes Agent\n"
-            f"/both -> both reply\n"
-            f"/whoami -> show current status\n"
+            f"**HermesClaw** by @aaronwong1999\n"
+            f"**Current route**: **{route_label(backend)}**\n"
+            f"**/hermes** → switch to **Hermes**\n"
+            f"**/openclaw** → switch to **OpenClaw**\n"
+            f"**/both** → reply with **Hermes + OpenClaw**\n"
+            f"**/whoami** → show current status\n"
             f"All other messages are passed through to the active agent."
         )
     return None  # Pass through non-router commands.
