@@ -1,0 +1,21 @@
+# Environment
+.env
+
+# Runtime files
+*.log
+router_state.json
+*.tmp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
