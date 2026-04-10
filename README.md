@@ -5,7 +5,7 @@
 **在同一个微信账号上同时跑 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 和 [OpenClaw](https://github.com/openclaw/openclaw)。一条命令安装。**
 
 <p align="center">
-  <img src="docs/HermesClaw.png" alt="HermesClaw — One WeChat bot. Two AI brains. /hermes, /openclaw, /both." style="max-width: 100%;" />
+  <img src="docs/HermesClaw.jpeg" alt="HermesClaw — One WeChat bot. Two AI brains. /hermes, /openclaw, /both." style="max-width: 100%;" />
 </p>
 
 <p align="center">
@@ -14,12 +14,6 @@
   <img src="https://img.shields.io/badge/platform-WeChat-07c160.svg" alt="WeChat">
   <a href="https://github.com/AaronWong1999/hermesclaw/stargazers"><img src="https://img.shields.io/github/stars/AaronWong1999/hermesclaw?style=social" alt="Stars"></a>
   <a href="https://github.com/AaronWong1999/hermesclaw/network/members"><img src="https://img.shields.io/github/forks/AaronWong1999/hermesclaw?style=social" alt="Forks"></a>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/01-whoami-hermes.jpg" width="32%" alt="/whoami shows current route, /hermes switches to Hermes, then asks about pre-market US stock news" />
-  <img src="docs/screenshots/02-openclaw-voice.jpg" width="32%" alt="/openclaw switches to OpenClaw, then a 6-second voice message gets transcribed and answered" />
-  <img src="docs/screenshots/03-both-image.jpg" width="32%" alt="/both routes to both agents, an image of a T-shirt is sent and OpenClaw replies with a Chinese description" />
 </p>
 
 <p align="center">
