@@ -109,7 +109,8 @@ The installer will:
 3. Patch openclaw-weixin `baseUrl` → `http://127.0.0.1:19999` (proxy A)
 4. Patch Hermes `WEIXIN_BASE_URL` → `http://127.0.0.1:19998` (proxy B)
 5. Install Python deps (`requests`, `python-dotenv`)
-6. Set up the `hermesclaw` systemd service
+6. Create OpenClaw media symlink (workaround for media path mismatch)
+7. Set up the `hermesclaw` systemd service
 
 After install, restart your gateways and send `/whoami` in WeChat.
 
@@ -150,7 +151,7 @@ Default route is **Hermes**. In `/both` mode, replies are prefixed with `[Hermes
 ```text
 hermesclaw.py        # ~500 lines. Dual-proxy router.
 install.sh           # Smart auto-detecting installer.
-tests/               # 58 pytest tests (core, proxy, recovery).
+tests/               # 59 pytest tests (core, proxy, recovery).
 README.md
 LICENSE
 docs/                # Screenshots and media.
@@ -205,6 +206,25 @@ rm -rf "$HOME/hermesclaw"
 <a href="https://www.star-history.com/#AaronWong1999/hermesclaw&Date">
   <img src="https://api.star-history.com/svg?repos=AaronWong1999/hermesclaw&type=Date" alt="Star History Chart" width="600">
 </a>
+
+---
+
+## Changelog
+
+### v0.2.0
+
+- **Fix: Hermes "Response formatting failed"** — Proxy servers now use `ThreadingHTTPServer` instead of single-threaded `HTTPServer`. The old server blocked `sendmessage` requests behind `getupdates` long-polls (up to 35s), causing the Hermes gateway's 15s timeout to expire → `BrokenPipeError` → dropped replies. Each request now gets its own thread.
+
+- **Fix: OpenClaw ENOENT on media files** — OpenClaw saves inbound media to `~/.openclaw/media/` but reads from `~/.openclaw/workspace/media/`. The installer now creates a symlink to bridge the two paths. This is an upstream OpenClaw framework bug; the symlink is a robust workaround.
+
+- **Improved error handling** — `BrokenPipeError` during proxy response write-back is now caught specifically and logged as DEBUG (benign — the upstream request already succeeded). Other errors still get proper 502 responses.
+
+### v2.0.0
+
+- Complete rewrite: dual-proxy gateway architecture
+- Removed ~400 lines of AES/CDN media processing
+- 59 pytest tests (core, proxy, recovery)
+- Smart 8-case detection installer
 
 ---
 

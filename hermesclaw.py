@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from enum import Enum
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -379,14 +379,22 @@ def make_proxy_handler(queue, ilink_base_url, ilink_token, state, tag):
                         self.send_header(k, v)
                 self.end_headers()
                 self.wfile.write(resp.content)
+            except BrokenPipeError:
+                # Gateway disconnected before we could write back the response.
+                # The upstream request already succeeded; nothing to retry.
+                log.debug("BrokenPipe on write-back (benign): %s", ep)
             except Exception as e:
                 log.error("Proxy forward error: %s", e)
-                err = json.dumps({"ret": -1, "errmsg": str(e)}).encode()
-                self.send_response(502)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(err)))
-                self.end_headers()
-                self.wfile.write(err)
+                try:
+                    err = json.dumps({"ret": -1, "errmsg": str(e)}).encode()
+                    self.send_response(502)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(err)))
+                    self.end_headers()
+                    self.wfile.write(err)
+                except BrokenPipeError:
+                    log.debug("BrokenPipe writing error response (benign)")
+
 
         def _write_json(self, code, obj):
             data = json.dumps(obj).encode()
@@ -547,7 +555,7 @@ def main():
         h_handler = make_proxy_handler(
             hermes_q, base_url, token, state, tag="[Hermes Agent]",
         )
-        h_srv = HTTPServer(("127.0.0.1", hermes_port), h_handler)
+        h_srv = ThreadingHTTPServer(("127.0.0.1", hermes_port), h_handler)
         threading.Thread(target=h_srv.serve_forever, daemon=True).start()
         servers.append(h_srv)
         log.info("Hermes proxy started on :%d", hermes_port)
@@ -556,7 +564,7 @@ def main():
         oc_handler = make_proxy_handler(
             oc_q, base_url, token, state, tag="[OpenClaw]",
         )
-        oc_srv = HTTPServer(("127.0.0.1", oc_port), oc_handler)
+        oc_srv = ThreadingHTTPServer(("127.0.0.1", oc_port), oc_handler)
         threading.Thread(target=oc_srv.serve_forever, daemon=True).start()
         servers.append(oc_srv)
         log.info("OpenClaw proxy started on :%d", oc_port)

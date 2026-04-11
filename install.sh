@@ -430,7 +430,33 @@ elif ${HAS_HERMES_GW}; then
     echo "  Manually set WEIXIN_BASE_URL=http://127.0.0.1:${HERMES_PROXY_PORT} in your Hermes config."
 fi
 
-# 9) systemd service.
+# 9) OpenClaw media symlink workaround.
+#    OpenClaw saves inbound media to ~/.openclaw/media/ but its reply system
+#    reads from ~/.openclaw/workspace/media/.  Bridge with a symlink.
+if ${HAS_OC_GW}; then
+    OC_MEDIA_SRC="${HOME}/.openclaw/media"
+    OC_MEDIA_DST="${HOME}/.openclaw/workspace/media"
+    if [ -d "$OC_MEDIA_SRC" ]; then
+        if [ -L "$OC_MEDIA_DST" ]; then
+            ok "OpenClaw media symlink already exists."
+        elif [ -d "$OC_MEDIA_DST" ]; then
+            # Real directory — move contents into source and replace with symlink
+            warn "Replacing ${OC_MEDIA_DST} directory with symlink to ${OC_MEDIA_SRC}"
+            cp -rn "${OC_MEDIA_DST}/." "${OC_MEDIA_SRC}/" 2>/dev/null || true
+            rm -rf "${OC_MEDIA_DST}"
+            ln -s "${OC_MEDIA_SRC}" "${OC_MEDIA_DST}"
+            ok "OpenClaw media symlink created."
+        else
+            mkdir -p "$(dirname "$OC_MEDIA_DST")"
+            ln -s "${OC_MEDIA_SRC}" "${OC_MEDIA_DST}"
+            ok "OpenClaw media symlink created."
+        fi
+    else
+        warn "OpenClaw media source dir not found (${OC_MEDIA_SRC}). Symlink skipped — will be created on first media receive."
+    fi
+fi
+
+# 10) systemd service.
 install_systemd_service
 
 echo ""
