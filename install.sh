@@ -1,14 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
+# ── HermesClaw v2 installer ──────────────────────────────────────────────
+# Detects Hermes Agent gateway + OpenClaw gateway, configures both to
+# connect through HermesClaw's dual proxy, and installs the systemd service.
+
 REPO_URL="${HERMESCLAW_REPO_URL:-https://github.com/AaronWong1999/hermesclaw.git}"
 PROJECT_DIR="${HERMESCLAW_DIR:-${HOME}/hermesclaw}"
 SERVICE_NAME="hermesclaw"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 ENV_FILE="${PROJECT_DIR}/.env"
 APP_FILE="${PROJECT_DIR}/hermesclaw.py"
-DEFAULT_PROXY_PORT="${PROXY_PORT:-19999}"
-CLAWBOT_INSTALL_CMD="npx -y @tencent-weixin/openclaw-weixin-cli@latest install"
+HERMES_PROXY_PORT="${HERMES_PROXY_PORT:-19998}"
+OPENCLAW_PROXY_PORT="${OPENCLAW_PROXY_PORT:-19999}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -16,15 +20,17 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-ok() { echo -e "${GREEN}OK${NC}  $1"; }
+ok()   { echo -e "${GREEN}OK${NC}  $1"; }
 warn() { echo -e "${YELLOW}WARN${NC} $1"; }
-err() { echo -e "${RED}ERR${NC}  $1"; }
+err()  { echo -e "${RED}ERR${NC}  $1"; }
 info() { echo -e "${CYAN}INFO${NC} $1"; }
 
 echo ""
-echo -e "${CYAN}HermesClaw installer${NC}"
-echo -e "${CYAN}One-command setup for Hermes + OpenClaw WeChat routing${NC}"
+echo -e "${CYAN}HermesClaw v2 installer${NC}"
+echo -e "${CYAN}Dual-proxy gateway router for Hermes + OpenClaw on WeChat${NC}"
 echo ""
+
+# ── Helpers ───────────────────────────────────────────────────────────────
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -33,33 +39,30 @@ need_cmd() {
     }
 }
 
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
 need_cmd python3
-need_cmd curl
 need_cmd git
 
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+# ── Bootstrap repo ────────────────────────────────────────────────────────
 
 bootstrap_repo_if_needed() {
     if [ -f "${APP_FILE}" ] && [ -f "${PROJECT_DIR}/README.md" ]; then
         return 0
     fi
-    info "Bootstrapping HermesClaw repository into ${PROJECT_DIR}."
+    info "Cloning HermesClaw into ${PROJECT_DIR}."
     rm -rf "${PROJECT_DIR}"
     git clone "${REPO_URL}" "${PROJECT_DIR}"
 }
 
+# ── .env reader ───────────────────────────────────────────────────────────
+
 read_env_value() {
-    local key="$1"
-    local file="$2"
+    local key="$1" file="$2"
     [ -f "$file" ] || return 0
     python3 - "$key" "$file" <<'PY'
-import pathlib
-import sys
-
-key = sys.argv[1]
-path = pathlib.Path(sys.argv[2])
+import pathlib, sys
+key, path = sys.argv[1], pathlib.Path(sys.argv[2])
 for raw in path.read_text().splitlines():
     line = raw.strip()
     if not line or line.startswith("#") or "=" not in line:
@@ -71,12 +74,12 @@ for raw in path.read_text().splitlines():
 PY
 }
 
-discover_accounts_dirs() {
+# ── OpenClaw gateway detection ────────────────────────────────────────────
+
+discover_oc_accounts_dirs() {
     local dirs=()
-    if [ -n "${OPENCLAW_WEIXIN_ACCOUNTS_DIR:-}" ] && [ -d "${OPENCLAW_WEIXIN_ACCOUNTS_DIR}" ]; then
-        dirs+=("${OPENCLAW_WEIXIN_ACCOUNTS_DIR}")
-    fi
     for candidate in \
+        "${HOME}/.openclaw/state/openclaw-weixin/accounts" \
         "${HOME}/.openclaw/openclaw-weixin/accounts" \
         "${HOME}/.config/openclaw/openclaw-weixin/accounts" \
         "${HOME}/openclaw-weixin/accounts"
@@ -89,7 +92,7 @@ discover_accounts_dirs() {
     printf '%s\n' "${dirs[@]}" | awk 'NF && !seen[$0]++'
 }
 
-discover_account_files() {
+discover_oc_account_files() {
     local dir
     for dir in "$@"; do
         find "$dir" -maxdepth 1 -type f -name "*.json" \
@@ -98,139 +101,92 @@ discover_account_files() {
     done | awk 'NF && !seen[$0]++'
 }
 
-scan_accounts() {
-    ACCOUNT_DIRS=()
-    ACCOUNT_FILES=()
-    mapfile -t ACCOUNT_DIRS < <(discover_accounts_dirs)
-    if [ "${#ACCOUNT_DIRS[@]}" -gt 0 ]; then
-        mapfile -t ACCOUNT_FILES < <(discover_account_files "${ACCOUNT_DIRS[@]}")
+scan_oc_accounts() {
+    OC_ACCOUNT_DIRS=()
+    OC_ACCOUNT_FILES=()
+    mapfile -t OC_ACCOUNT_DIRS < <(discover_oc_accounts_dirs)
+    if [ "${#OC_ACCOUNT_DIRS[@]}" -gt 0 ]; then
+        mapfile -t OC_ACCOUNT_FILES < <(discover_oc_account_files "${OC_ACCOUNT_DIRS[@]}")
     fi
 }
+
+extract_json_field() {
+    python3 - "$1" "$2" <<'PY'
+import json, pathlib, sys
+path, key = pathlib.Path(sys.argv[1]), sys.argv[2]
+try:
+    print(json.loads(path.read_text()).get(key, ""))
+except Exception:
+    pass
+PY
+}
+
+# ── Hermes gateway detection ─────────────────────────────────────────────
+
+discover_hermes_weixin_accounts() {
+    local dirs=()
+    for candidate in \
+        "${HOME}/.hermes/weixin/accounts" \
+        "${HOME}/.hermes/hermes-agent/weixin/accounts"
+    do
+        [ -d "$candidate" ] && dirs+=("$candidate")
+    done
+    while IFS= read -r found; do
+        [ -n "$found" ] && dirs+=("$found")
+    done < <(find "${HOME}/.hermes" -maxdepth 4 -type d -name accounts -path "*/weixin/*" 2>/dev/null || true)
+    local files=()
+    for d in "${dirs[@]}"; do
+        while IFS= read -r f; do
+            files+=("$f")
+        done < <(find "$d" -maxdepth 1 -name "*.json" -type f 2>/dev/null)
+    done
+    printf '%s\n' "${files[@]}" | awk 'NF && !seen[$0]++'
+}
+
+detect_hermes_env_file() {
+    for candidate in \
+        "${HOME}/.hermes/.env" \
+        "${HOME}/.hermes/hermes-agent/.env"
+    do
+        [ -f "$candidate" ] && { echo "$candidate"; return 0; }
+    done
+    return 1
+}
+
+# ── Token extraction (from OC or Hermes account files) ────────────────────
 
 extract_first_token() {
     local file
     for file in "$@"; do
-        python3 - "$file" <<'PY'
-import json
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-try:
-    value = json.loads(path.read_text()).get("token", "")
-except Exception:
-    value = ""
-if value:
-    print(value)
-PY
-    done | awk 'NF { print; exit }'
-}
-
-extract_baseurl_report() {
-    local file
-    for file in "$@"; do
-        python3 - "$file" <<'PY'
-import json
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-try:
-    data = json.loads(path.read_text())
-except Exception:
-    raise SystemExit(0)
-for key in ("baseUrl", "base_url", "apiBaseUrl", "serverUrl"):
-    value = data.get(key)
-    if value:
-        print(f"{path}:{key}={value}")
-PY
+        local tok
+        tok="$(extract_json_field "$file" "token")"
+        if [ -n "$tok" ]; then
+            echo "$tok"
+            return 0
+        fi
     done
 }
 
-install_clawbot_if_needed() {
-    scan_accounts
-    if [ "${#ACCOUNT_FILES[@]}" -gt 0 ]; then
-        ok "Detected existing clawbot/openclaw-weixin account files."
-        return 0
-    fi
+# ── Patching ──────────────────────────────────────────────────────────────
 
-    need_cmd npx
-    info "No clawbot account config found. Installing clawbot first."
-    eval "${CLAWBOT_INSTALL_CMD}"
-    scan_accounts
-    if [ "${#ACCOUNT_FILES[@]}" -eq 0 ]; then
-        err "Clawbot install did not produce any account files."
-        echo "Run the clawbot login flow first, then rerun install.sh."
-        exit 1
-    fi
-    ok "Clawbot install completed and account files were found."
-}
-
-detect_openclaw_present() {
-    if command_exists openclaw; then
-        return 0
-    fi
-    [ -d "${HOME}/.openclaw" ]
-}
-
-detect_hermes_present() {
-    if command_exists hermes; then
-        return 0
-    fi
-    curl -fsS -m 2 "http://127.0.0.1:8642/health" >/dev/null 2>&1
-}
-
-detect_hermes_url() {
-    local from_env
-    from_env="${HERMES_API_URL:-$(read_env_value HERMES_API_URL "$ENV_FILE")}"
-    if [ -n "$from_env" ] && curl -fsS -m 2 "${from_env%/}/health" >/dev/null 2>&1; then
-        echo "$from_env"
-        return 0
-    fi
-    if curl -fsS -m 2 "http://127.0.0.1:8642/health" >/dev/null 2>&1; then
-        echo "http://127.0.0.1:8642"
-        return 0
-    fi
-    echo "${from_env:-http://127.0.0.1:8642}"
-}
-
-detect_openclaw_url() {
-    local from_env
-    from_env="${OPENCLAW_API_URL:-$(read_env_value OPENCLAW_API_URL "$ENV_FILE")}"
-    if [ -n "$from_env" ] && curl -fsS -m 2 "$from_env" >/dev/null 2>&1; then
-        echo "$from_env"
-        return 0
-    fi
-    if curl -fsS -m 2 "http://127.0.0.1:18789" >/dev/null 2>&1; then
-        echo "http://127.0.0.1:18789"
-        return 0
-    fi
-    echo "${from_env:-http://127.0.0.1:18789}"
-}
-
-patch_account_file() {
-    local file="$1"
-    local proxy_url="$2"
+patch_oc_account_file() {
+    local file="$1" proxy_url="$2"
     python3 - "$file" "$proxy_url" <<'PY'
-import json
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-proxy_url = sys.argv[2]
+import json, pathlib, sys
+path, proxy_url = pathlib.Path(sys.argv[1]), sys.argv[2]
 data = json.loads(path.read_text())
 changed = False
 for key in ("baseUrl", "base_url", "apiBaseUrl", "serverUrl"):
-    if key in data and data.get(key) != proxy_url:
+    if key in data and data[key] != proxy_url:
         data[key] = proxy_url
         changed = True
 if "baseUrl" not in data:
     data["baseUrl"] = proxy_url
     changed = True
 if changed:
-    backup = path.with_suffix(path.suffix + ".bak")
-    if not backup.exists():
-        backup.write_text(path.read_text())
+    bak = path.with_suffix(path.suffix + ".bak")
+    if not bak.exists():
+        bak.write_text(path.read_text())
     path.write_text(json.dumps(data, indent=2) + "\n")
     print("patched")
 else:
@@ -238,42 +194,71 @@ else:
 PY
 }
 
+patch_hermes_env_base_url() {
+    local env_file="$1" proxy_url="$2"
+    python3 - "$env_file" "$proxy_url" <<'PY'
+import pathlib, sys
+path, proxy_url = pathlib.Path(sys.argv[1]), sys.argv[2]
+lines = path.read_text().splitlines()
+found = False
+out = []
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("WEIXIN_BASE_URL="):
+        out.append(f"WEIXIN_BASE_URL={proxy_url}")
+        found = True
+    else:
+        out.append(line)
+if not found:
+    out.append(f"WEIXIN_BASE_URL={proxy_url}")
+bak = path.with_suffix(".bak")
+if not bak.exists():
+    bak.write_text(path.read_text())
+path.write_text("\n".join(out) + "\n")
+print("patched" if found else "added")
+PY
+}
+
+# ── Write .env ────────────────────────────────────────────────────────────
+
 write_env_file() {
-    local token="$1"
+    local token="$1" hermes_on="$2" oc_on="$3"
     cat > "$ENV_FILE" <<EOF
 ILINK_BASE_URL=https://ilinkai.weixin.qq.com
 ILINK_TOKEN=${token}
-CDN_BASE_URL=
-HERMES_API_URL=${HERMES_URL}
-OPENCLAW_API_URL=${OPENCLAW_URL}
-PROXY_PORT=${PROXY_PORT}
+HERMES_PROXY_PORT=${HERMES_PROXY_PORT}
+OPENCLAW_PROXY_PORT=${OPENCLAW_PROXY_PORT}
+HERMES_ENABLED=${hermes_on}
+OPENCLAW_ENABLED=${oc_on}
 STATE_FILE=${PROJECT_DIR}/router_state.json
 LOG_FILE=${PROJECT_DIR}/hermesclaw.log
 LONG_POLL_TIMEOUT=35
-HERMES_CONNECT_TIMEOUT=10
-HERMES_READ_TIMEOUT=600
 EOF
     chmod 600 "$ENV_FILE"
 }
 
+# ── Python deps ───────────────────────────────────────────────────────────
+
 install_python_deps() {
-    info "Installing Python dependencies."
-    pip3 install --user -q pycryptodome requests python-dotenv 2>/dev/null || \
-    pip3 install --user --break-system-packages -q pycryptodome requests python-dotenv 2>/dev/null || \
-    sudo pip3 install -q pycryptodome requests python-dotenv
-    ok "Python dependencies are ready."
+    info "Installing Python dependencies (requests, python-dotenv)."
+    pip3 install --user -q requests python-dotenv 2>/dev/null || \
+    pip3 install --user --break-system-packages -q requests python-dotenv 2>/dev/null || \
+    sudo pip3 install -q requests python-dotenv
+    ok "Python dependencies ready."
 }
+
+# ── systemd ───────────────────────────────────────────────────────────────
 
 install_systemd_service() {
     [ "$(uname)" = "Linux" ] || {
-        warn "systemd is not available. Run: python3 ${APP_FILE}"
+        warn "systemd not available. Run manually: python3 ${APP_FILE}"
         return 0
     }
     need_cmd systemctl
     info "Installing ${SERVICE_NAME}.service."
     cat > /tmp/hermesclaw.service <<EOF
 [Unit]
-Description=HermesClaw Bridge
+Description=HermesClaw v2 Dual-Proxy Router
 After=network.target
 
 [Service]
@@ -306,106 +291,160 @@ EOF
     }
     ok "${SERVICE_NAME}.service is running."
 }
-print_ai_fallback() {
+
+# ── AI-assisted install/uninstall prompt ──────────────────────────────────
+
+print_ai_prompt() {
     cat <<'EOF'
-AI fallback prompt:
-Read README.md and install.sh in this repository. Detect whether Hermes, OpenClaw, clawbot/openclaw-weixin, python3, pip3, node, npx, and systemd are installed. Reuse existing config when found. If clawbot is missing, install it. If Hermes or OpenClaw is missing, stop and print exact next actions instead of guessing. Patch clawbot to point to HermesClaw only after clawbot works. Keep iterating until /whoami works in WeChat.
+
+AI-assisted install prompt (paste this to an AI agent):
+  Read README.md and install.sh in the hermesclaw repository.
+  Detect whether Hermes Agent, OpenClaw, their WeChat gateways,
+  python3, pip3, and systemd are present.  At least one gateway
+  must be configured.  Extract the iLink token from the first
+  available gateway account file.  Patch openclaw-weixin baseUrl
+  to http://127.0.0.1:19999 and Hermes WEIXIN_BASE_URL to
+  http://127.0.0.1:19998.  Install dependencies and systemd
+  service.  Verify /whoami works in WeChat.
+
+AI-assisted uninstall prompt:
+  Stop and disable the hermesclaw systemd service.  Restore
+  openclaw-weixin account .bak files.  Remove WEIXIN_BASE_URL
+  override from ~/.hermes/.env (or restore .bak).  Optionally
+  remove ~/hermesclaw directory.
 EOF
 }
 
+# ══════════════════════════════════════════════════════════════════════════
+# Main flow
+# ══════════════════════════════════════════════════════════════════════════
+
 bootstrap_repo_if_needed
 
-scan_accounts
+# 1) Detect gateways.
+HAS_OC_GW=false
+HAS_HERMES_GW=false
 HAS_OPENCLAW=false
 HAS_HERMES=false
-HAS_CLAWBOT=false
-HAS_NPX=false
-command_exists npx && HAS_NPX=true
-detect_openclaw_present && HAS_OPENCLAW=true || true
-detect_hermes_present && HAS_HERMES=true || true
-[ "${#ACCOUNT_FILES[@]}" -gt 0 ] && HAS_CLAWBOT=true
 
-if ! ${HAS_CLAWBOT}; then
-    if ${HAS_NPX}; then
-        warn "No clawbot config was found."
-        install_clawbot_if_needed
-        HAS_CLAWBOT=true
-    else
-        err "clawbot/openclaw-weixin is missing and npx is not available."
-        print_ai_fallback
-        exit 1
-    fi
+# OpenClaw presence.
+if command_exists openclaw || [ -d "${HOME}/.openclaw" ]; then
+    HAS_OPENCLAW=true
 fi
 
-HERMES_URL="$(detect_hermes_url)"
-OPENCLAW_URL="$(detect_openclaw_url)"
-PROXY_PORT="${DEFAULT_PROXY_PORT}"
-PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
-ILINK_TOKEN_VALUE="${ILINK_TOKEN:-$(read_env_value ILINK_TOKEN "$ENV_FILE")}"
-if [ -z "$ILINK_TOKEN_VALUE" ] && [ "${#ACCOUNT_FILES[@]}" -gt 0 ]; then
-    ILINK_TOKEN_VALUE="$(extract_first_token "${ACCOUNT_FILES[@]}")"
+# OpenClaw gateway (clawbot / openclaw-weixin).
+scan_oc_accounts
+[ "${#OC_ACCOUNT_FILES[@]}" -gt 0 ] && HAS_OC_GW=true
+
+# Hermes presence.
+if command_exists hermes || [ -d "${HOME}/.hermes" ]; then
+    HAS_HERMES=true
 fi
 
+# Hermes WeChat gateway.
+HERMES_WX_FILES=()
+mapfile -t HERMES_WX_FILES < <(discover_hermes_weixin_accounts)
+[ "${#HERMES_WX_FILES[@]}" -gt 0 ] && HAS_HERMES_GW=true
+
+HERMES_ENV_FILE=""
+HERMES_ENV_FILE="$(detect_hermes_env_file 2>/dev/null || true)"
+
+# 2) Gate: at least one gateway must be configured.
+if ! ${HAS_OC_GW} && ! ${HAS_HERMES_GW}; then
+    err "No WeChat gateway configured."
+    echo ""
+    echo "HermesClaw requires at least one of:"
+    echo "  - OpenClaw clawbot (openclaw-weixin) with an account file"
+    echo "  - Hermes Agent WeChat gateway with an account file"
+    echo ""
+    echo "Install them first, then rerun this script."
+    print_ai_prompt
+    exit 1
+fi
+
+# 3) Find iLink token.
+ILINK_TOKEN_VALUE="${ILINK_TOKEN:-$(read_env_value ILINK_TOKEN "$ENV_FILE" 2>/dev/null || true)}"
+if [ -z "$ILINK_TOKEN_VALUE" ] && [ "${#OC_ACCOUNT_FILES[@]}" -gt 0 ]; then
+    ILINK_TOKEN_VALUE="$(extract_first_token "${OC_ACCOUNT_FILES[@]}" || true)"
+fi
+if [ -z "$ILINK_TOKEN_VALUE" ] && [ "${#HERMES_WX_FILES[@]}" -gt 0 ]; then
+    ILINK_TOKEN_VALUE="$(extract_first_token "${HERMES_WX_FILES[@]}" || true)"
+fi
+
+if [ -z "$ILINK_TOKEN_VALUE" ]; then
+    err "Could not find iLink token from gateway account files or .env."
+    print_ai_prompt
+    exit 1
+fi
+
+# 4) Summary.
 echo "Discovery summary"
-echo "  App:         ${APP_FILE}"
-echo "  python3:     yes"
-echo "  npx:         ${HAS_NPX}"
-echo "  Hermes:      ${HAS_HERMES}"
-echo "  OpenClaw:    ${HAS_OPENCLAW}"
-echo "  clawbot:     ${HAS_CLAWBOT}"
-echo "  Hermes API:  ${HERMES_URL}"
-echo "  OpenClaw:    ${OPENCLAW_URL}"
-echo "  Proxy:       ${PROXY_URL}"
-echo "  Accounts:    ${#ACCOUNT_FILES[@]}"
-if [ "${#ACCOUNT_FILES[@]}" -gt 0 ]; then
-    extract_baseurl_report "${ACCOUNT_FILES[@]}" | sed 's/^/  Plugin:      /'
+echo "  Hermes Agent:    ${HAS_HERMES}"
+echo "  Hermes WX GW:    ${HAS_HERMES_GW}  (${#HERMES_WX_FILES[@]} account files)"
+echo "  OpenClaw:        ${HAS_OPENCLAW}"
+echo "  OpenClaw WX GW:  ${HAS_OC_GW}  (${#OC_ACCOUNT_FILES[@]} account files)"
+echo "  iLink token:     ${ILINK_TOKEN_VALUE:0:16}..."
+echo "  Hermes proxy:    :${HERMES_PROXY_PORT}"
+echo "  OpenClaw proxy:  :${OPENCLAW_PROXY_PORT}"
+if [ -n "$HERMES_ENV_FILE" ]; then
+    echo "  Hermes .env:     ${HERMES_ENV_FILE}"
 fi
 echo ""
 
-if [ -z "$ILINK_TOKEN_VALUE" ]; then
-    err "Could not discover ILINK_TOKEN from .env or clawbot account files."
-    print_ai_fallback
-    exit 1
+if ! ${HAS_OC_GW}; then
+    warn "OpenClaw gateway not found. OpenClaw routing will be disabled."
+fi
+if ! ${HAS_HERMES_GW}; then
+    warn "Hermes gateway not found. Hermes routing will be disabled."
 fi
 
-if ! ${HAS_HERMES}; then
-    err "Hermes was not detected."
-    echo "Set HERMES_API_URL to a working Hermes endpoint or install Hermes first."
-    print_ai_fallback
-    exit 1
-fi
-
-if ! ${HAS_OPENCLAW}; then
-    warn "OpenClaw was not detected. Hermes-only routing can still work, but /openclaw and /both will not be useful until OpenClaw is installed."
-fi
-
-if [ "${#ACCOUNT_FILES[@]}" -eq 0 ]; then
-    err "No clawbot account files were found after detection."
-    print_ai_fallback
-    exit 1
-fi
-
-read -r -p "Continue? [Y/n] " REPLY
+read -r -p "Continue with installation? [Y/n] " REPLY
 if [[ "${REPLY:-Y}" =~ ^[Nn]$ ]]; then
     echo "Aborted."
     exit 0
 fi
 
+# 5) Install deps.
 install_python_deps
-write_env_file "$ILINK_TOKEN_VALUE"
-ok "Wrote ${ENV_FILE}."
 
-info "Patching clawbot config to point at HermesClaw."
-for account_file in "${ACCOUNT_FILES[@]}"; do
-    result="$(patch_account_file "$account_file" "$PROXY_URL")"
-    ok "${account_file}: ${result}"
-done
+# 6) Write HermesClaw .env.
+write_env_file "$ILINK_TOKEN_VALUE" "${HAS_HERMES_GW}" "${HAS_OC_GW}"
+ok "Wrote ${ENV_FILE}"
 
+# 7) Patch OpenClaw gateway -> proxy A.
+if ${HAS_OC_GW}; then
+    info "Patching openclaw-weixin to use proxy :${OPENCLAW_PROXY_PORT}"
+    for f in "${OC_ACCOUNT_FILES[@]}"; do
+        result="$(patch_oc_account_file "$f" "http://127.0.0.1:${OPENCLAW_PROXY_PORT}")"
+        ok "  ${f}: ${result}"
+    done
+fi
+
+# 8) Patch Hermes gateway -> proxy B.
+if ${HAS_HERMES_GW} && [ -n "$HERMES_ENV_FILE" ]; then
+    info "Patching Hermes WEIXIN_BASE_URL to use proxy :${HERMES_PROXY_PORT}"
+    result="$(patch_hermes_env_base_url "$HERMES_ENV_FILE" "http://127.0.0.1:${HERMES_PROXY_PORT}")"
+    ok "  ${HERMES_ENV_FILE}: ${result}"
+elif ${HAS_HERMES_GW}; then
+    warn "Could not find Hermes .env file to patch WEIXIN_BASE_URL."
+    echo "  Manually set WEIXIN_BASE_URL=http://127.0.0.1:${HERMES_PROXY_PORT} in your Hermes config."
+fi
+
+# 9) systemd service.
 install_systemd_service
 
 echo ""
-echo "Next steps"
-echo "  1. In WeChat, send: /whoami"
-echo "  2. If needed, inspect: systemctl status hermesclaw"
-echo "  3. If needed, inspect: journalctl -u hermesclaw -n 100 --no-pager"
+echo -e "${GREEN}Installation complete!${NC}"
 echo ""
+echo "Next steps:"
+echo "  1. Restart your gateways so they pick up the new config:"
+if ${HAS_HERMES_GW}; then
+    echo "     sudo systemctl restart hermes-gateway  (or however you run it)"
+fi
+if ${HAS_OC_GW}; then
+    echo "     systemctl --user restart openclaw  (or however you run it)"
+fi
+echo "  2. Send /whoami in WeChat to verify routing"
+echo "  3. Logs: journalctl -u hermesclaw -f --no-pager"
+echo ""
+print_ai_prompt

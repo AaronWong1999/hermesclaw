@@ -1,8 +1,8 @@
 # HermesClaw
 
-**Run [Hermes Agent](https://github.com/NousResearch/hermes-agent) and [OpenClaw](https://github.com/openclaw/openclaw) on the same WeChat account. One command to install.**
+**Dual-open [Hermes Agent](https://github.com/NousResearch/hermes-agent) and [OpenClaw](https://github.com/openclaw/openclaw) on the same WeChat account. One command to install.**
 
-**在同一个微信账号上同时跑 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 和 [OpenClaw](https://github.com/openclaw/openclaw)。一条命令安装。**
+**在同一个微信账号上同时双开 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 和 [OpenClaw](https://github.com/openclaw/openclaw)。一条命令安装。**
 
 <p align="center">
   <img src="docs/HermesClaw.jpeg" alt="HermesClaw — One WeChat bot. Two AI brains. /hermes, /openclaw, /both." style="max-width: 100%;" />
@@ -17,20 +17,83 @@
 </p>
 
 <p align="center">
-  <em>One Clawbot account. Two AI brains. Switch with <code>/hermes</code>, <code>/openclaw</code>, <code>/both</code>.</em><br/>
-  <em>一个 Clawbot 账号，两个 AI 大脑。<code>/hermes</code>、<code>/openclaw</code>、<code>/both</code> 一句话切换。</em>
+  <em>One iLink account. Two AI brains. Switch with <code>/hermes</code>, <code>/openclaw</code>, <code>/both</code>.</em><br/>
+  <em>一个 iLink 账号，两个 AI 大脑。<code>/hermes</code>、<code>/openclaw</code>、<code>/both</code> 一句话切换。</em>
 </p>
 
 ---
 
 ## Why HermesClaw
 
-- **Hermes Agent has no native WeChat support.** It works on Telegram, Discord, Slack, WhatsApp, Signal — but not WeChat. HermesClaw fills the gap by piggybacking on OpenClaw's existing Clawbot infrastructure.
-- **OpenClaw users on WeChat can now run Hermes Agent in parallel.** No second account, no second QR code, no second device.
-- **Voice, image, video, and file messages all forward through.** Voice arrives at Hermes as a transcription. Images/videos/files arrive as decrypted local file paths Hermes can read with vision tools.
-- **One-line install.** `curl | bash` auto-detects Hermes, OpenClaw, clawbot, Python, systemd. Reuses your existing config when it can. Patches Clawbot to point at HermesClaw.
+Both Hermes Agent and OpenClaw now support WeChat natively — **but you can't run both on the same account.** Each gateway exclusively locks the iLink connection. If you start both, one gets 403 errors and drops messages.
 
-**痛点**：Hermes Agent 不支持微信；微信只能跑 OpenClaw，没法双开。HermesClaw 让一个 Clawbot 同时挂两个 Agent，文本/语音/图片/视频/文件全转发，一行命令装完。
+HermesClaw solves this by becoming the **sole iLink poller**, then running two local proxy servers — one for each gateway. Each gateway believes it's talking to the real iLink API.
+
+现在 Hermes 和 OpenClaw 都原生支持微信了——**但你不能在同一个账号上双开。** 每个 Gateway 会独占 iLink 连接。HermesClaw 解决这个问题：它作为唯一的 iLink 轮询者，运行两个本地代理，让两个 Gateway 各连各的。
+
+---
+
+## Before / After
+
+| | Without HermesClaw | With HermesClaw |
+|---|---|---|
+| Hermes on WeChat | ✅ Works (native gateway) | ✅ Works |
+| OpenClaw on WeChat | ✅ Works (clawbot) | ✅ Works |
+| Both on same account | ❌ Token conflict / 403 | ✅ `/both` mode |
+| Voice messages | ✅ Each handles natively | ✅ Transcription forwarded |
+| Images / video / files | ✅ Each handles natively | ✅ Raw iLink msg forwarded |
+| Switching agents | — | `/hermes`, `/openclaw`, `/both` |
+
+---
+
+## Architecture
+
+```
+                    ┌────────── iLink API ──────────┐
+                    │  ilinkai.weixin.qq.com        │
+                    └──────────┬────────────────────┘
+                               │
+                      (sole poller / token owner)
+                               │
+                    ┌──────────▼────────────────────┐
+                    │     HermesClaw v2              │
+                    │  routes by /hermes /openclaw   │
+                    │  queues raw iLink messages     │
+                    ├──────────┬────────────────────┤
+                    │          │                    │
+              Proxy A (:19999)    Proxy B (:19998) │
+              for openclaw-weixin for hermes-gw    │
+                    │          │                    │
+                    ▼          ▼                    │
+              ┌──────────┐ ┌──────────┐            │
+              │ openclaw │ │ hermes   │            │
+              │ gateway  │ │ gateway  │            │
+              │ polls    │ │ polls    │            │
+              │ proxy A  │ │ proxy B  │            │
+              └────┬─────┘ └────┬─────┘            │
+                   │            │                  │
+              sendmessage  sendmessage             │
+                   └─────┬──────┘                  │
+                         │ (proxy forwards to iLink)│
+                         └─────────────────────────┘
+```
+
+HermesClaw is a thin Python proxy (~500 lines). It does **not** process media, call agent APIs, or touch agent memory. It just queues and forwards raw iLink protocol messages. Each gateway handles its own media decryption, markdown formatting, and AI interaction natively.
+
+HermesClaw 只是一个轻量转发代理（~500 行），不处理媒体、不调 Agent API、不动记忆。每个 Gateway 原生处理自己的媒体解密和 AI 交互。
+
+---
+
+## Prerequisites
+
+Before installing HermesClaw, you need **at least one** of:
+
+1. **OpenClaw + clawbot** (`openclaw-weixin`) — installed and logged into WeChat
+2. **Hermes Agent + WeChat gateway** — installed with `hermes gateway` configured
+
+Both installed = full dual-open. One installed = single-agent mode with the option to add the other later.
+
+安装 HermesClaw 前，需要至少安装以下其中一个：OpenClaw 的 clawbot，或者 Hermes 的微信 Gateway。
 
 ---
 
@@ -40,156 +103,98 @@
 curl -fsSL https://raw.githubusercontent.com/AaronWong1999/hermesclaw/main/install.sh | bash
 ```
 
-That's it. The installer detects what's already on your machine and only installs what's missing.
+The installer will:
+1. Detect which gateways are installed and configured
+2. Extract the iLink token from gateway account files
+3. Patch openclaw-weixin `baseUrl` → `http://127.0.0.1:19999` (proxy A)
+4. Patch Hermes `WEIXIN_BASE_URL` → `http://127.0.0.1:19998` (proxy B)
+5. Install Python deps (`requests`, `python-dotenv`)
+6. Set up the `hermesclaw` systemd service
 
-就这一句。安装脚本会自动检测已有环境，缺什么补什么。
+After install, restart your gateways and send `/whoami` in WeChat.
 
-### Or let an AI do it for you · 让 AI 替你装
+### AI-assisted install
 
-Drop one of these prompts into Hermes, Claude Code, or any agent CLI on the target machine:
+Drop this into any AI agent on the target machine:
 
 ```text
 Run: curl -fsSL https://raw.githubusercontent.com/AaronWong1999/hermesclaw/main/install.sh | bash
 
-Then read README.md and install.sh from the installed HermesClaw directory. Detect whether
-Hermes, OpenClaw, clawbot/openclaw-weixin, python3, pip3, node, npx, and systemd are
-installed. Reuse existing config when found. If clawbot is missing, install it first. If
-Hermes or OpenClaw is missing, stop and print exact next actions instead of guessing. Only
-patch clawbot to HermesClaw after clawbot itself already works. Keep iterating until
-/whoami works in WeChat.
-```
-
-```text
-先执行：curl -fsSL https://raw.githubusercontent.com/AaronWong1999/hermesclaw/main/install.sh | bash
-
-然后读取安装后的 HermesClaw 目录里的 README.md 和 install.sh。检测 Hermes、OpenClaw、
-clawbot/openclaw-weixin、python3、pip3、node、npx、systemd 是否已安装。能复用现有配置就复用。
-缺 clawbot 就先装 clawbot。缺 Hermes 或 OpenClaw 时不要瞎猜，直接打印下一步要做的事。
-只有在 clawbot 本身已经能跑之后，才把它改到 HermesClaw。一直迭代直到微信里的 /whoami 可用。
+Then read README.md and install.sh from the installed HermesClaw directory.
+Detect whether Hermes Agent, OpenClaw, their WeChat gateways, python3, pip3,
+and systemd are present.  At least one gateway must be configured.  Extract
+the iLink token from the first available gateway account file.  Patch
+openclaw-weixin baseUrl to http://127.0.0.1:19999 and Hermes WEIXIN_BASE_URL
+to http://127.0.0.1:19998.  Install dependencies and systemd service.
+Restart gateways.  Verify /whoami works in WeChat.
 ```
 
 ---
 
-## Before / After
-
-| | Without HermesClaw | With HermesClaw |
-|---|---|---|
-| Hermes Agent on WeChat | ❌ Not supported | ✅ Works |
-| OpenClaw on WeChat | ✅ Works | ✅ Still works |
-| Run both on one account | ❌ Impossible | ✅ `/both` |
-| Voice messages → Hermes | ❌ | ✅ Transcribed |
-| Images / files → Hermes | ❌ | ✅ Forwarded as local paths |
-| Switching agents | — | `/hermes`, `/openclaw`, `/both` |
-
----
-
-## Architecture
-
-```mermaid
-flowchart LR
-    U[WeChat User] -->|message| WX[Clawbot Account]
-    WX -->|iLink poll| HC[HermesClaw Router]
-    HC -->|route by /command| ROUTE{Current Route}
-    ROUTE -->|/hermes| H[Hermes Agent\nlocalhost:8642]
-    ROUTE -->|/openclaw| O[OpenClaw\nlocalhost:18789]
-    ROUTE -->|/both| H
-    ROUTE -->|/both| O
-    H -->|reply| HC
-    O -->|reply| HC
-    HC -->|iLink send| WX
-    WX -->|message| U
-```
-
-HermesClaw is a thin Python proxy. It only does routing and forwarding — it does not rewrite agent memory and does not try to replace anything either side already does. Per-user route state lives in `router_state.json`.
-
-HermesClaw 只是一个轻量 Python 代理，只做路由转发，不动 agent 记忆。每个用户的当前路由存在 `router_state.json`。
-
----
-
-## Commands · 指令
+## Commands
 
 | Command | Action |
 |---------|--------|
 | `/hermes` | Route to **Hermes** only |
 | `/openclaw` | Route to **OpenClaw** only |
 | `/both` | Route to **Hermes + OpenClaw** (reply from both) |
-| `/whoami` | Show current route and help |
+| `/whoami` | Show current route and status |
 | anything else | Forward to the active agent(s) |
 
-Default route is **Hermes**. Voice messages are delivered as transcription text. Images, videos, and files are downloaded, AES-decrypted, and handed to Hermes as local file paths.
-
-默认路由是 **Hermes**。语音以转写文本形式投递；图片/视频/文件会被下载、AES 解密，再以本地路径交给 Hermes。
-
----
-
-## How the installer works
-
-1. Detect Hermes, OpenClaw, clawbot/openclaw-weixin, Python, `npx`, and systemd.
-2. Reuse existing config when possible.
-3. Install clawbot first if it's missing and installable.
-4. Read the configured Hermes / OpenClaw endpoints (or fall back to defaults).
-5. Read the iLink token from the existing clawbot account config.
-6. Patch clawbot to point at HermesClaw's local proxy.
-7. Write `.env` and install the `hermesclaw.service` systemd unit.
-
-After install, send `/whoami` to your Clawbot in WeChat to confirm it's alive.
-
-装完之后，在微信里给 Clawbot 发 `/whoami`，看到路由信息就说明跑起来了。
+Default route is **Hermes**. In `/both` mode, replies are prefixed with `[Hermes Agent]` / `[OpenClaw]` for attribution.
 
 ---
 
 ## Project layout
 
 ```text
-hermesclaw.py        # 763 lines, single file. The whole router.
+hermesclaw.py        # ~500 lines. Dual-proxy router.
 install.sh           # Smart auto-detecting installer.
-uninstall.sh         # Reverses the install (or use the AI prompt below).
+tests/               # 58 pytest tests (core, proxy, recovery).
 README.md
 LICENSE
-docs/screenshots/    # Demo screenshots used in this README.
+docs/                # Screenshots and media.
 ```
-
-The project is intentionally minimal. One Python file, no external state besides `router_state.json` and `.env`.
-
-刻意保持极简：一个 Python 文件，全部状态只在 `router_state.json` 和 `.env`。
 
 ---
 
 ## Media handling
 
-HermesClaw forwards text, voice transcription, images, videos, and files. Voice arrives in this format so Hermes can quote it cleanly:
+HermesClaw forwards **raw iLink protocol messages** to each gateway. This means:
 
-```text
-[The user sent a voice message. Here's what they said: "..."]
-```
+- **Text** — forwarded as-is
+- **Voice** — iLink includes a transcription; HermesClaw forwards the transcription text
+- **Images / video / files** — the raw iLink message (with CDN URLs and AES keys) is forwarded; each gateway downloads and decrypts natively
 
-Images/videos/files are downloaded into the HermesClaw directory and passed to Hermes as local file paths (not base64 blobs). Raw audio bytes are not forwarded — only transcription text.
-
-图片/视频/文件会下载到 HermesClaw 目录，以本地路径的形式给到 Hermes，不会传 base64。原始音频字节不会被转发，只发转写文本。
+HermesClaw does **not** do AES decryption, CDN downloads, or media re-encoding. That's each gateway's job.
 
 ---
 
 ## Uninstall
 
-If your environment is non-standard, let an AI handle it:
+### AI-assisted
 
 ```text
-Read README.md and inspect the current machine. Find the HermesClaw project directory,
-the hermesclaw systemd service, and any clawbot/openclaw-weixin account configs that
-were patched to point at HermesClaw. Stop and disable hermesclaw.service, remove the
-service file, restore any *.json.bak account config backups if they exist, and only
-then remove the HermesClaw project directory after showing what will be deleted.
+Stop and disable the hermesclaw systemd service.  Restore openclaw-weixin
+account .bak files.  Remove WEIXIN_BASE_URL override from ~/.hermes/.env
+(or restore .bak).  Optionally remove ~/hermesclaw directory.
 ```
 
-Or do it manually:
+### Manual
 
 ```bash
 sudo systemctl stop hermesclaw
 sudo systemctl disable hermesclaw
 sudo rm -f /etc/systemd/system/hermesclaw.service
 sudo systemctl daemon-reload
-find "$HOME" -maxdepth 5 -type f -name "*.json.bak" -path "*/openclaw-weixin/accounts/*" \
-  -exec sh -c 'for f; do cp "$f" "${f%.bak}" && rm -f "$f"; done' sh {} +
+
+# Restore openclaw-weixin configs:
+find "$HOME" -maxdepth 5 -name "*.json.bak" -path "*/openclaw-weixin/accounts/*" \
+  -exec sh -c 'for f; do cp "$f" "${f%.bak}"; done' sh {} +
+
+# Restore Hermes .env:
+[ -f "$HOME/.hermes/.env.bak" ] && cp "$HOME/.hermes/.env.bak" "$HOME/.hermes/.env"
+
 rm -rf "$HOME/hermesclaw"
 ```
 
@@ -209,12 +214,10 @@ rm -rf "$HOME/hermesclaw"
 
 ---
 
-## Acknowledgements · 致谢
+## Acknowledgements
 
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — the agent that grows with you.
 - [openclaw/openclaw](https://github.com/openclaw/openclaw) — your own personal AI assistant. The lobster way. 🦞
-- The Clawbot / openclaw-weixin maintainers for the iLink WeChat bridge that made this possible.
+- The Clawbot / openclaw-weixin maintainers for the iLink WeChat bridge.
 
 HermesClaw is a community bridge. It is not affiliated with NousResearch or OpenClaw.
-
-HermesClaw 是一个社区桥接工具，与 NousResearch 和 OpenClaw 没有官方隶属关系。

@@ -12,6 +12,9 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
+# Old v1 backup
+hermesclaw_v1.py
+
 # IDE
 .vscode/
 .idea/
