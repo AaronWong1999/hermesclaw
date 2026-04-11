@@ -67,7 +67,10 @@ class State:
         with self.lock:
             if uid not in self.d:
                 self.d[uid] = {"route": Route.HERMES.value, "status_shown": False}
-            return Route(self.d[uid]["route"])
+            entry = self.d[uid]
+            # Migrate v1 format {"b": ...} to v2 {"route": ...}
+            raw = entry.get("route") or entry.get("b", Route.HERMES.value)
+            return Route(raw)
 
     def should_show_status(self, uid):
         with self.lock:

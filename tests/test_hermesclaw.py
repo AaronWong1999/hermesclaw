@@ -54,6 +54,16 @@ class TestState:
         s.set("u1", Route.BOTH)
         assert s.should_show_status("u1") is False
 
+    def test_v1_state_migration(self, state_file):
+        """v1 used {"b": "..."} key; v2 uses {"route": "..."}."""
+        Path(state_file).write_text(json.dumps({
+            "user1": {"b": "both", "status_shown": True},
+            "user2": {"b": "openclaw"},
+        }))
+        s = State(state_file)
+        assert s.get("user1") == Route.BOTH
+        assert s.get("user2") == Route.OPENCLAW
+
     def test_thread_safety(self, state_file):
         s = State(state_file)
         errors = []
