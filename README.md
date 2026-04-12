@@ -127,6 +127,12 @@ and systemd are present.  At least one gateway must be configured.  Extract
 the iLink token from the first available gateway account file.  Patch
 openclaw-weixin baseUrl to http://127.0.0.1:19999 and Hermes WEIXIN_BASE_URL
 to http://127.0.0.1:19998.  Install dependencies and systemd service.
+
+If Hermes Agent WeChat gateway is detected, the installer will offer to patch
+weixin.py to disable newline-based message splitting (recommended).  Accept
+this patch so long replies are sent as single messages instead of being split
+by paragraphs.  The fix script is at scripts/fix_hermes_splitting.sh.
+
 Restart gateways.  Verify /whoami works in WeChat.
 ```
 
@@ -227,7 +233,7 @@ sudo systemctl restart hermes
 
 ### v0.2.1 (2026-04-12)
 
-- **Fix: Hermes message splitting** — Documented workaround for Hermes Agent's newline-based message splitting behavior. This is a Hermes `weixin.py` design issue, not HermesClaw. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the fix.
+- **Fix: Hermes message splitting** — The installer now offers to patch Hermes Agent's `weixin.py` to disable newline-based message splitting during installation (recommended, default Yes). This ensures long replies are sent as single messages instead of being split by paragraphs. Existing users can run `bash scripts/fix_hermes_splitting.sh` manually.
 - **Fix: OpenClaw "Edit failed" errors** — Documented diagnosis for OpenClaw config write failures, typically caused by invalid model configurations.
 
 ### v0.2.0

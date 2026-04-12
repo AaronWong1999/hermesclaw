@@ -305,13 +305,17 @@ AI-assisted install prompt (paste this to an AI agent):
   available gateway account file.  Patch openclaw-weixin baseUrl
   to http://127.0.0.1:19999 and Hermes WEIXIN_BASE_URL to
   http://127.0.0.1:19998.  Install dependencies and systemd
-  service.  Verify /whoami works in WeChat.
+  service.  If Hermes Agent WeChat gateway is detected, accept
+  the installer's offer to patch weixin.py to disable newline-based
+  message splitting (recommended) — or run scripts/fix_hermes_splitting.sh
+  manually after install.  Restart gateways.  Verify /whoami works.
 
 AI-assisted uninstall prompt:
   Stop and disable the hermesclaw systemd service.  Restore
   openclaw-weixin account .bak files.  Remove WEIXIN_BASE_URL
   override from ~/.hermes/.env (or restore .bak).  Optionally
-  remove ~/hermesclaw directory.
+  restore weixin.py from its .bak if the message-splitting fix
+  was applied.  Optionally remove ~/hermesclaw directory.
 EOF
 }
 
@@ -428,6 +432,29 @@ if ${HAS_HERMES_GW} && [ -n "$HERMES_ENV_FILE" ]; then
 elif ${HAS_HERMES_GW}; then
     warn "Could not find Hermes .env file to patch WEIXIN_BASE_URL."
     echo "  Manually set WEIXIN_BASE_URL=http://127.0.0.1:${HERMES_PROXY_PORT} in your Hermes config."
+fi
+
+# 8.5) Optional: Fix Hermes Agent newline-based message splitting.
+if ${HAS_HERMES_GW}; then
+    echo ""
+    echo -e "${CYAN}Hermes Agent message splitting fix${NC}"
+    echo "By default, Hermes Agent's WeChat adapter splits long messages by newlines,"
+    echo "sending each paragraph as a separate WeChat message. This can flood your chat."
+    echo ""
+    echo "We can patch weixin.py to keep messages as single units (split by length only)."
+    echo -e "${YELLOW}推荐 (Recommended): Apply this fix.${NC}"
+    read -r -p "Apply Hermes message splitting fix? [Y/n] " APPLY_SPLIT_FIX
+    if [[ "${APPLY_SPLIT_FIX:-Y}" =~ ^[Yy]$ ]] || [[ "${APPLY_SPLIT_FIX:-}" == "" ]]; then
+        info "Applying Hermes Agent message splitting fix..."
+        FIX_SCRIPT="${PROJECT_DIR}/scripts/fix_hermes_splitting.sh"
+        if [ -f "$FIX_SCRIPT" ]; then
+            bash "$FIX_SCRIPT" && ok "Message splitting fix applied. Restart Hermes to take effect." || warn "Patch failed, see TROUBLESHOOTING.md for manual fix."
+        else
+            warn "Fix script not found at ${FIX_SCRIPT}. See TROUBLESHOOTING.md for manual fix."
+        fi
+    else
+        info "Skipped. You can apply this fix later: bash scripts/fix_hermes_splitting.sh"
+    fi
 fi
 
 # 9) OpenClaw media symlink workaround.
