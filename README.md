@@ -12,6 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python 3.8+">
   <img src="https://img.shields.io/badge/platform-WeChat-07c160.svg" alt="WeChat">
+  <a href="https://x.com/AaronYonW"><img src="https://img.shields.io/badge/X-%40AaronYonW-000000.svg" alt="X / Twitter"></a>
   <a href="https://github.com/AaronWong1999/hermesclaw/stargazers"><img src="https://img.shields.io/github/stars/AaronWong1999/hermesclaw?style=social" alt="Stars"></a>
   <a href="https://github.com/AaronWong1999/hermesclaw/network/members"><img src="https://img.shields.io/github/forks/AaronWong1999/hermesclaw?style=social" alt="Forks"></a>
 </p>
@@ -236,7 +237,7 @@ rm -rf "$HOME/hermesclaw"
 
 ## License
 
-[MIT](LICENSE) © [@aaronwong1999](https://github.com/AaronWong1999)
+[MIT](LICENSE) — by [@AaronWong1999](https://github.com/AaronWong1999) · [X @AaronYonW](https://x.com/AaronYonW)
 
 ---
 

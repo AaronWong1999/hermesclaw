@@ -148,7 +148,7 @@ def cmd(state, uid, text):
     if c == "/whoami":
         route = state.get(uid)
         return (
-            f"**HermesClaw v2** by @aaronwong1999\n"
+            f"**HermesClaw** by X @AaronYonW\n"
             f"**Current route**: **{route_label(route)}**\n"
             f"**/hermes** → Hermes only\n"
             f"**/openclaw** → OpenClaw only\n"
