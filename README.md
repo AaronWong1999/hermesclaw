@@ -5,16 +5,12 @@
 **在同一个微信账号上同时双开 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 和 [OpenClaw](https://github.com/openclaw/openclaw)。一条命令安装。**
 
 <p align="center">
-  <img src="docs/HermesClaw.jpeg" alt="HermesClaw — One WeChat bot. Two AI brains. /hermes, /openclaw, /both." style="max-width: 100%;" />
+  <a href="https://x.com/AaronYonW"><img src="https://img.shields.io/badge/X-%40AaronYonW-000000.svg" alt="X / Twitter"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python 3.8+">
-  <img src="https://img.shields.io/badge/platform-WeChat-07c160.svg" alt="WeChat">
-  <a href="https://x.com/AaronYonW"><img src="https://img.shields.io/badge/X-%40AaronYonW-000000.svg" alt="X / Twitter"></a>
-  <a href="https://github.com/AaronWong1999/hermesclaw/stargazers"><img src="https://img.shields.io/github/stars/AaronWong1999/hermesclaw?style=social" alt="Stars"></a>
-  <a href="https://github.com/AaronWong1999/hermesclaw/network/members"><img src="https://img.shields.io/github/forks/AaronWong1999/hermesclaw?style=social" alt="Forks"></a>
+  <img src="docs/HermesClaw.jpeg" alt="HermesClaw — One WeChat bot. Two AI brains. /hermes, /openclaw, /both." style="max-width: 100%;" />
 </p>
 
 <p align="center">
