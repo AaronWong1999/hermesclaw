@@ -211,15 +211,9 @@ rm -rf "$HOME/hermesclaw"
 
 ## Troubleshooting
 
-Common issues and solutions are documented in [TROUBLESHOOTING.md](TROUBLESHOOTING.md):
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
 
-- **Hermes splits long messages into multiple WeChat messages** — Run `bash scripts/fix_hermes_splitting.sh` or see [manual fix](TROUBLESHOOTING.md#issue-1-hermes-agent-splits-long-messages-into-multiple-wechat-messages)
-- **OpenClaw "Edit failed" errors** — Config validation issues, see [diagnosis guide](TROUBLESHOOTING.md#issue-2-openclaw-sends-openclaw-️--edit-in-openclawopenclaw-json-failed)
-- **BrokenPipeError in logs** — Benign, no action needed
-- **403 errors from one gateway** — Proxy configuration issue
-- **Service won't start** — Missing token or dependencies
-
-### Quick fix for Hermes message splitting
+Quick fix for Hermes message splitting:
 
 ```bash
 cd ~/hermesclaw
@@ -233,17 +227,14 @@ sudo systemctl restart hermes
 
 ### v0.2.1 (2026-04-12)
 
-- **Documented fix: Hermes message splitting** — Added troubleshooting guide for Hermes Agent's newline-based message splitting behavior. The issue is in Hermes's `weixin.py`, not HermesClaw. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#issue-1-hermes-agent-splits-long-messages-into-multiple-wechat-messages) for the fix.
-
-- **Documented fix: OpenClaw "Edit failed" errors** — These are OpenClaw's own notifications about config write failures, typically caused by invalid model/provider configurations (e.g., deprecated `manifest/auto`). See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#issue-2-openclaw-sends-openclaw-️--edit-in-openclawopenclaw-json-failed) for diagnosis and fixes.
+- **Fix: Hermes message splitting** — Documented workaround for Hermes Agent's newline-based message splitting behavior. This is a Hermes `weixin.py` design issue, not HermesClaw. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the fix.
+- **Fix: OpenClaw "Edit failed" errors** — Documented diagnosis for OpenClaw config write failures, typically caused by invalid model configurations.
 
 ### v0.2.0
 
-- **Fix: Hermes "Response formatting failed"** — Proxy servers now use `ThreadingHTTPServer` instead of single-threaded `HTTPServer`. The old server blocked `sendmessage` requests behind `getupdates` long-polls (up to 35s), causing the Hermes gateway's 15s timeout to expire → `BrokenPipeError` → dropped replies. Each request now gets its own thread.
-
-- **Fix: OpenClaw ENOENT on media files** — OpenClaw saves inbound media to `~/.openclaw/media/` but reads from `~/.openclaw/workspace/media/`. The installer now creates a symlink to bridge the two paths. This is an upstream OpenClaw framework bug; the symlink is a robust workaround.
-
-- **Improved error handling** — `BrokenPipeError` during proxy response write-back is now caught specifically and logged as DEBUG (benign — the upstream request already succeeded). Other errors still get proper 502 responses.
+- **Fix: Hermes "Response formatting failed"** — Proxy servers now use `ThreadingHTTPServer` instead of single-threaded `HTTPServer`.
+- **Fix: OpenClaw ENOENT on media files** — Installer now creates symlink for media path mismatch.
+- **Improved error handling** — `BrokenPipeError` now caught and logged as DEBUG.
 
 ### v2.0.0
 
