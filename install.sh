@@ -307,7 +307,7 @@ AI-assisted install prompt (paste this to an AI agent):
   http://127.0.0.1:19998.  Install dependencies and systemd
   service.  If Hermes Agent WeChat gateway is detected, accept
   the installer's offer to patch weixin.py to disable newline-based
-  message splitting (recommended) — or run scripts/fix_hermes_splitting.sh
+  message splitting (recommended) — or run fix_hermes_splitting.sh
   manually after install.  Restart gateways.  Verify /whoami works.
 
 AI-assisted uninstall prompt:
@@ -446,14 +446,14 @@ if ${HAS_HERMES_GW}; then
     read -r -p "Apply Hermes message splitting fix? [Y/n] " APPLY_SPLIT_FIX
     if [[ "${APPLY_SPLIT_FIX:-Y}" =~ ^[Yy]$ ]] || [[ "${APPLY_SPLIT_FIX:-}" == "" ]]; then
         info "Applying Hermes Agent message splitting fix..."
-        FIX_SCRIPT="${PROJECT_DIR}/scripts/fix_hermes_splitting.sh"
+        FIX_SCRIPT="${PROJECT_DIR}/fix_hermes_splitting.sh"
         if [ -f "$FIX_SCRIPT" ]; then
             bash "$FIX_SCRIPT" && ok "Message splitting fix applied. Restart Hermes to take effect." || warn "Patch failed, see TROUBLESHOOTING.md for manual fix."
         else
             warn "Fix script not found at ${FIX_SCRIPT}. See TROUBLESHOOTING.md for manual fix."
         fi
     else
-        info "Skipped. You can apply this fix later: bash scripts/fix_hermes_splitting.sh"
+        info "Skipped. You can apply this fix later: bash fix_hermes_splitting.sh"
     fi
 fi
 

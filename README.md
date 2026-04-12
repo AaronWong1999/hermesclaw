@@ -131,7 +131,7 @@ to http://127.0.0.1:19998.  Install dependencies and systemd service.
 If Hermes Agent WeChat gateway is detected, the installer will offer to patch
 weixin.py to disable newline-based message splitting (recommended).  Accept
 this patch so long replies are sent as single messages instead of being split
-by paragraphs.  The fix script is at scripts/fix_hermes_splitting.sh.
+by paragraphs.  The fix script is at fix_hermes_splitting.sh.
 
 Restart gateways.  Verify /whoami works in WeChat.
 ```
@@ -155,12 +155,13 @@ Default route is **Hermes**. In `/both` mode, replies are prefixed with `[Hermes
 ## Project layout
 
 ```text
-hermesclaw.py        # ~500 lines. Dual-proxy router.
-install.sh           # Smart auto-detecting installer.
-tests/               # 59 pytest tests (core, proxy, recovery).
+hermesclaw.py             # ~500 lines. Dual-proxy router.
+install.sh                # Smart auto-detecting installer.
+fix_hermes_splitting.sh   # Patch Hermes weixin.py (optional, recommended).
+tests/                    # 59 pytest tests (core, proxy, recovery).
 README.md
 LICENSE
-docs/                # Screenshots and media.
+docs/                     # Screenshots and media.
 ```
 
 ---
@@ -215,39 +216,21 @@ rm -rf "$HOME/hermesclaw"
 
 ---
 
-## Troubleshooting
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
-
-Quick fix for Hermes message splitting:
-
-```bash
-cd ~/hermesclaw
-bash scripts/fix_hermes_splitting.sh
-sudo systemctl restart hermes
-```
-
----
-
 ## Changelog
 
 ### v0.2.1 (2026-04-12)
 
-- **Fix: Hermes message splitting** — The installer now offers to patch Hermes Agent's `weixin.py` to disable newline-based message splitting during installation (recommended, default Yes). This ensures long replies are sent as single messages instead of being split by paragraphs. Existing users can run `bash scripts/fix_hermes_splitting.sh` manually.
-- **Fix: OpenClaw "Edit failed" errors** — Documented diagnosis for OpenClaw config write failures, typically caused by invalid model configurations.
+- **Fix: Hermes message splitting** — The installer now offers to patch Hermes Agent's `weixin.py` to disable newline-based message splitting during installation (recommended, default Yes). This ensures long replies are sent as single messages instead of being split by paragraphs. Existing users can run `bash fix_hermes_splitting.sh` manually.
 
 ### v0.2.0
 
+- **Complete rewrite**: dual-proxy gateway architecture.
+- Removed ~400 lines of AES/CDN media processing.
+- 59 pytest tests (core, proxy, recovery).
+- Smart 8-case detection installer.
 - **Fix: Hermes "Response formatting failed"** — Proxy servers now use `ThreadingHTTPServer` instead of single-threaded `HTTPServer`.
 - **Fix: OpenClaw ENOENT on media files** — Installer now creates symlink for media path mismatch.
 - **Improved error handling** — `BrokenPipeError` now caught and logged as DEBUG.
-
-### v2.0.0
-
-- Complete rewrite: dual-proxy gateway architecture
-- Removed ~400 lines of AES/CDN media processing
-- 59 pytest tests (core, proxy, recovery)
-- Smart 8-case detection installer
 
 ---
 
