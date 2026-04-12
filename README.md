@@ -209,7 +209,33 @@ rm -rf "$HOME/hermesclaw"
 
 ---
 
+## Troubleshooting
+
+Common issues and solutions are documented in [TROUBLESHOOTING.md](TROUBLESHOOTING.md):
+
+- **Hermes splits long messages into multiple WeChat messages** — Run `bash scripts/fix_hermes_splitting.sh` or see [manual fix](TROUBLESHOOTING.md#issue-1-hermes-agent-splits-long-messages-into-multiple-wechat-messages)
+- **OpenClaw "Edit failed" errors** — Config validation issues, see [diagnosis guide](TROUBLESHOOTING.md#issue-2-openclaw-sends-openclaw-️--edit-in-openclawopenclaw-json-failed)
+- **BrokenPipeError in logs** — Benign, no action needed
+- **403 errors from one gateway** — Proxy configuration issue
+- **Service won't start** — Missing token or dependencies
+
+### Quick fix for Hermes message splitting
+
+```bash
+cd ~/hermesclaw
+bash scripts/fix_hermes_splitting.sh
+sudo systemctl restart hermes
+```
+
+---
+
 ## Changelog
+
+### v0.2.1 (2026-04-12)
+
+- **Documented fix: Hermes message splitting** — Added troubleshooting guide for Hermes Agent's newline-based message splitting behavior. The issue is in Hermes's `weixin.py`, not HermesClaw. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#issue-1-hermes-agent-splits-long-messages-into-multiple-wechat-messages) for the fix.
+
+- **Documented fix: OpenClaw "Edit failed" errors** — These are OpenClaw's own notifications about config write failures, typically caused by invalid model/provider configurations (e.g., deprecated `manifest/auto`). See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#issue-2-openclaw-sends-openclaw-️--edit-in-openclawopenclaw-json-failed) for diagnosis and fixes.
 
 ### v0.2.0
 
