@@ -36,10 +36,6 @@ Special thanks to the [Hermes Agent](https://github.com/NousResearch/hermes-agen
 
 特别感谢 Nous Research 的 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 团队，在其 GitHub 官方 README 的 `Community` 区收录并推荐 **HermesClaw**。
 
-This recognition means a lot to this project, and HermesClaw is built with sincere appreciation for the Hermes Agent ecosystem and community.
-
-这份认可对本项目意义很大，也感谢 Hermes Agent 生态与社区带来的启发和支持。
-
 <p align="center">
   <img src="docs/hermes-agent-community-recognition.png" alt="Hermes Agent README Community section highlighting HermesClaw" style="max-width: 100%;" />
 </p>
