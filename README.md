@@ -30,7 +30,7 @@ HermesClaw solves this by becoming the **sole iLink poller**, then running two l
 
 ---
 
-## Acknowledgement
+## Special Thanks
 
 Special thanks to the [Hermes Agent](https://github.com/NousResearch/hermes-agent) team at Nous Research for recognizing and recommending **HermesClaw** in the `Community` section of their official GitHub README.
 
@@ -256,7 +256,7 @@ rm -rf "$HOME/hermesclaw"
 
 ---
 
-## Acknowledgements
+## Credits
 
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — the agent that grows with you.
 - [openclaw/openclaw](https://github.com/openclaw/openclaw) — your own personal AI assistant. The lobster way. 🦞
