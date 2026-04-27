@@ -380,7 +380,7 @@ HERMES_ENV_FILE=""
 HERMES_ENV_FILE="$(detect_hermes_env_file 2>/dev/null || true)"
 
 # ── OpenCode detection ────────────────────────────────────────────────────
-if command -v opencode &>/dev/null || [ -f "$HOME/.npm-global/bin/opencode" ]; then
+if command -v opencode &>/dev/null || [ -x "$HOME/.npm-global/bin/opencode" ]; then
     OPENCODE_CMD=$(command -v opencode 2>/dev/null || echo "$HOME/.npm-global/bin/opencode")
     info "OpenCode found: $OPENCODE_CMD"
     OPENCODE_ENABLED=true

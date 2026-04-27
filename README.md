@@ -118,14 +118,23 @@ Both installed = full dual-open. One installed = single-agent mode with the opti
 curl -fsSL https://raw.githubusercontent.com/AaronWong1999/hermesclaw/main/install.sh | bash
 ```
 
+For **non-interactive / automated** installs (skips all confirmation prompts):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AaronWong1999/hermesclaw/main/install.sh | HERMESCLAW_YES=1 bash
+# or, when running the script directly:
+bash install.sh -y
+```
+
 The installer will:
 1. Detect which gateways are installed and configured
 2. Extract the iLink token from gateway account files
 3. Patch openclaw-weixin `baseUrl` → `http://127.0.0.1:19999` (proxy A)
 4. Patch Hermes `WEIXIN_BASE_URL` → `http://127.0.0.1:19998` (proxy B)
-5. Install Python deps (`requests`, `python-dotenv`)
-6. Create OpenClaw media symlink (workaround for media path mismatch)
-7. Set up the `hermesclaw` systemd service
+5. Detect OpenCode CLI (optional — enables `/opencode` and `/three`)
+6. Install Python deps (`requests`, `python-dotenv`)
+7. Create OpenClaw media symlink (workaround for media path mismatch)
+8. Set up the `hermesclaw` systemd service
 
 After install, restart your gateways and send `/whoami` in WeChat.
 
@@ -142,6 +151,12 @@ and systemd are present.  At least one gateway must be configured.  Extract
 the iLink token from the first available gateway account file.  Patch
 openclaw-weixin baseUrl to http://127.0.0.1:19999 and Hermes WEIXIN_BASE_URL
 to http://127.0.0.1:19998.  Install dependencies and systemd service.
+
+Also detect OpenCode CLI: run `command -v opencode` or check
+~/.npm-global/bin/opencode.  If not found, suggest installing with:
+  npm install -g opencode-ai
+Set OPENCODE_CMD in .env to the detected path (or empty if not found).
+OPENCODE_MODEL defaults to opencode/minimax-m2.5-free (free, no API key needed).
 
 If Hermes Agent WeChat gateway is detected, the installer will offer to patch
 weixin.py to disable newline-based message splitting (recommended).  Accept
@@ -182,10 +197,10 @@ Then set `OPENCODE_CMD` in `.env` (the installer auto-detects it). Use `/opencod
 ## Project layout
 
 ```text
-hermesclaw.py             # ~700 lines. Triple-proxy router + ACP bridge.
-install.sh                # Smart auto-detecting installer.
+hermesclaw.py             # ~870 lines. Triple-proxy router + ACP bridge.
+install.sh                # Smart auto-detecting installer (-y for non-interactive).
 fix_hermes_splitting.sh   # Patch Hermes weixin.py (optional, recommended).
-tests/                    # 76 pytest tests (core, proxy, recovery).
+tests/                    # 82 pytest tests (core, proxy, ACP, recovery).
 README.md
 LICENSE
 docs/                     # Screenshots and media.
@@ -252,7 +267,10 @@ rm -rf "$HOME/hermesclaw"
 - **`/three` command** — Route messages to all three agents simultaneously (Hermes + OpenClaw + OpenCode).
 - **"Not installed" detection** — If `opencode` binary is not found, `/opencode` and `/three` show a helpful install hint instead of crashing.
 - **Tagging in THREE mode** — Proxy tags Hermes/OpenClaw replies; OpenCode worker tags its own replies with `[OpenCode]`.
-- **76 tests** — 18 new tests covering new routes, ACPSession mock server, OpenCodeBridge, and THREE mode tagging.
+- **Dead subprocess recovery** — If OpenCode exits mid-session, pending prompts unblock immediately with an error instead of hanging for the full 120 s timeout.
+- **Non-interactive installer** — `bash install.sh -y` (or `HERMESCLAW_YES=1 bash install.sh`) skips all confirmation prompts; OpenCode appears in the discovery summary.
+- **Installer git pull** — Re-running install.sh on an existing install now pulls the latest code before continuing.
+- **82 tests** — 24 new tests covering new routes, ACPSession mock server, OpenCodeBridge, dead-subprocess recovery, voice-to-OpenCode, and THREE mode.
 
 ### v0.2.1 (2026-04-12)
 
