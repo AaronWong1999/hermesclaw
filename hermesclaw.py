@@ -174,16 +174,19 @@ def _media_name(item, kind, url):
 
 def _media_mime(item, kind, url):
     mime = _first_value_by_keys(item, ("mime_type", "mimeType", "content_type", "contentType"))
-    if mime:
-        return mime
-    guessed, _ = mimetypes.guess_type(url or _media_name(item, kind, url))
-    if guessed:
-        return guessed
-    return {
-        "image": "image/jpeg",
-        "video": "video/mp4",
-        "file": "application/octet-stream",
-    }.get(kind, "application/octet-stream")
+    if not mime:
+        guessed, _ = mimetypes.guess_type(url or _media_name(item, kind, url))
+        mime = guessed or {
+            "image": "image/jpeg",
+            "video": "video/mp4",
+            "file": "application/octet-stream",
+        }.get(kind, "application/octet-stream")
+    # File attachments must not carry a video/* MIME — the mixed signal
+    # (kind="file" but mimeType="video/mp4") confuses the LLM into treating
+    # the attachment as a video even when the user sent it as a document.
+    if kind == "file" and mime.startswith("video/"):
+        mime = "application/octet-stream"
+    return mime
 
 
 def _download_media(url, token):
@@ -218,7 +221,17 @@ def build_opencode_prompt(items, token=""):
         tp = item.get("type", 0)
         if tp in (T, VO) or tp == 0:
             continue
-        kind = media_kind(tp)
+        # Prefer the actual sub-key structure over type number alone — some
+        # iLink clients send document files with type=4 (video), so looking
+        # at the key name is more reliable than the integer type.
+        if "image_item" in item:
+            kind, tp = "image", IMG
+        elif "file_item" in item:
+            kind, tp = "file", FILE
+        elif "video_item" in item:
+            kind, tp = "video", VIDEO
+        else:
+            kind = media_kind(tp)
         url = _first_url(item)
         name = _media_name(item, kind, url)
         mime = _media_mime(item, kind, url)
@@ -309,7 +322,7 @@ class ACPSession:
                 "version": "0.3.0",
             },
             "clientCapabilities": {},
-        }, timeout=15)
+        }, timeout=30)
         if not r or "error" in r:
             raise RuntimeError(f"ACP initialize failed: {r}")
         self.prompt_capabilities = (
@@ -495,8 +508,9 @@ class ACPSession:
         with self._lock:
             self._active_req_id = None
             self._pending.pop(req_id, None)
+            self.alive = False  # force fresh session on next message
         log.warning("ACP timeout on session/prompt (id=%d)", req_id)
-        return "[OpenCode: timeout]"
+        return "[OpenCode: timeout — please try again]"
 
     def prompt(self, text, timeout=120):
         """Send a text prompt; return accumulated response text."""
@@ -544,7 +558,20 @@ class OpenCodeBridge:
     def _get_or_create(self, uid):
         with self._lock:
             s = self._sessions.get(uid)
-            if s is None or not s.alive:
+            if s is not None and s.alive:
+                return s
+
+        # Create the session outside the lock so other users are not blocked
+        # during the (sometimes slow) opencode acp startup sequence.
+        # opencode acp can crash silently on the first few attempts while its
+        # SQLite database initialises — retry up to 3 times with 2-second delays.
+        last_exc = None
+        for attempt in range(3):
+            if attempt > 0:
+                time.sleep(2)
+                log.info("Retrying OpenCode session for %s (attempt %d/3)",
+                         uid[:16], attempt + 1)
+            try:
                 log.info("Creating OpenCode session for %s", uid[:16])
                 s = ACPSession(
                     self.opencode_cmd,
@@ -552,8 +579,14 @@ class OpenCodeBridge:
                     self.model,
                     self.permission_strategy,
                 )
-                self._sessions[uid] = s
-        return s
+                with self._lock:
+                    self._sessions[uid] = s
+                return s
+            except Exception as e:
+                last_exc = e
+                log.warning("ACP session creation attempt %d/3 failed for %s: %s",
+                            attempt + 1, uid[:16], e)
+        raise RuntimeError(f"OpenCode failed to start after 3 attempts: {last_exc}")
 
     def close_session(self, uid):
         with self._lock:

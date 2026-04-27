@@ -601,6 +601,21 @@ class TestOpenCodeWorker:
         assert blocks[1]["type"] == "resource_link"
         assert blocks[1]["uri"].startswith("https://example.com/")
 
+    def test_file_item_overrides_video_type_number(self):
+        """file_item sub-key takes precedence over type=4 — avoids 'video' misidentification."""
+        item = {
+            "type": 4,  # video type int but sub-key says file
+            "file_item": {"file_url": "https://example.com/doc.mp4", "file_name": "doc.mp4"},
+        }
+        blocks = build_opencode_prompt([item])
+        intro = blocks[0]["text"].split("Metadata:")[0]
+        assert "file" in intro
+        assert "video" not in intro
+        # MIME must not be video/* — the mixed signal confuses the LLM
+        meta = json.loads(blocks[0]["text"].split("Metadata:")[1])
+        assert not meta["mimeType"].startswith("video/"), f"mimeType was {meta['mimeType']!r}"
+        assert blocks[1]["type"] == "resource_link"
+
 
 class TestACPSession:
     """Test ACPSession with an in-process mock ACP server."""
@@ -885,6 +900,58 @@ class TestACPSession:
         assert "error" in result.lower() or "died" in result.lower()
         assert sess.alive is False
 
+    def test_prompt_blocks_timeout_marks_session_dead(self):
+        """After prompt_blocks() times out, alive is False so next message gets fresh session."""
+        import os, io
+
+        srv_r_fd, cli_w_fd = os.pipe()
+        cli_r_fd, srv_w_fd = os.pipe()
+
+        def _handshake_only():
+            r = os.fdopen(srv_r_fd, "r")
+            w = os.fdopen(srv_w_fd, "w")
+            for raw in r:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+                rid = msg.get("id")
+                method = msg.get("method", "")
+                if method == "initialize":
+                    w.write(json.dumps({
+                        "jsonrpc": "2.0", "id": rid,
+                        "result": {"protocolVersion": 1, "agentCapabilities": {}},
+                    }) + "\n")
+                    w.flush()
+                elif method == "session/new":
+                    w.write(json.dumps({
+                        "jsonrpc": "2.0", "id": rid,
+                        "result": {"sessionId": "timeout-sess", "configOptions": []},
+                    }) + "\n")
+                    w.flush()
+                # session/prompt: no response — triggers timeout
+
+        threading.Thread(target=_handshake_only, daemon=True).start()
+
+        class _NoRespProc:
+            stdin = os.fdopen(cli_w_fd, "wb")
+            stdout = os.fdopen(cli_r_fd, "rb")
+            stderr = io.BytesIO(b"")
+            def terminate(self): pass
+            def wait(self, timeout=None): return 0
+            def kill(self): pass
+
+        with patch("subprocess.Popen", return_value=_NoRespProc()):
+            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+
+        assert sess.alive is True
+        result = sess.prompt_blocks([{"type": "text", "text": "hi"}], timeout=1)
+        assert "timeout" in result.lower()
+        assert sess.alive is False  # must be marked dead so next message gets a fresh session
+
 
 # ── OpenCodeBridge ────────────────────────────────────────────────────────
 
@@ -907,3 +974,33 @@ class TestOpenCodeBridge:
         r = cmd(s, "u1", "/three", opencode_bridge=bridge)
         assert "install" in r.lower()
         assert s.get("u1") == Route.HERMES  # route unchanged
+
+    def test_get_or_create_retries_on_crash(self):
+        """_get_or_create retries up to 3 times when opencode acp crashes on startup."""
+        call_count = [0]
+        mock_session = MagicMock()
+        mock_session.alive = True
+
+        def _flaky_session(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise RuntimeError("ACP initialize failed: ACP process died")
+            return mock_session
+
+        bridge = OpenCodeBridge("/fake/opencode")
+        with patch("hermesclaw.ACPSession", side_effect=_flaky_session):
+            with patch("hermesclaw.time.sleep"):  # skip actual 2-second delays
+                sess = bridge._get_or_create("u1")
+        assert call_count[0] == 3
+        assert sess is mock_session
+
+    def test_get_or_create_raises_after_three_failures(self):
+        """After 3 consecutive crashes, _get_or_create raises so the worker shows an error."""
+        def _always_fail(*args, **kwargs):
+            raise RuntimeError("ACP process died")
+
+        bridge = OpenCodeBridge("/fake/opencode")
+        with patch("hermesclaw.ACPSession", side_effect=_always_fail):
+            with patch("hermesclaw.time.sleep"):
+                with pytest.raises(RuntimeError, match="3 attempts"):
+                    bridge._get_or_create("u1")
