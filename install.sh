@@ -263,7 +263,7 @@ OPENCLAW_ENABLED=${oc_on}
 OPENCODE_ENABLED=${OPENCODE_ENABLED}
 OPENCODE_CMD=${OPENCODE_CMD}
 OPENCODE_MODEL=${OPENCODE_MODEL}
-OPENCODE_PERMISSION_STRATEGY=${OPENCODE_PERMISSION_STRATEGY:-allow_once}
+OPENCODE_PERMISSION_STRATEGY=${OPENCODE_PERMISSION_STRATEGY:-allow_always}
 STATE_FILE=${PROJECT_DIR}/router_state.json
 LOG_FILE=${PROJECT_DIR}/hermesclaw.log
 LONG_POLL_TIMEOUT=35
@@ -289,14 +289,23 @@ install_systemd_service() {
         return 0
     }
     need_cmd systemctl
-    local rw_paths="${PROJECT_DIR}"
+    local rw_paths="${HOME}"
     if [[ "${OPENCODE_ENABLED:-false}" == "true" ]]; then
-        mkdir -p \
-            "${HOME}/.config/opencode" \
-            "${HOME}/.local/share/opencode" \
-            "${HOME}/.local/state/opencode" \
-            "${HOME}/.cache/opencode"
-        rw_paths="${rw_paths} ${HOME}/.config/opencode ${HOME}/.local/share/opencode ${HOME}/.local/state/opencode ${HOME}/.cache/opencode"
+        mkdir -p "${HOME}/.config/opencode"
+        # Write opencode global config to auto-allow all tool operations without prompts.
+        # Without this, OpenCode defaults to "ask" for every tool call, which blocks
+        # headless WeChat sessions. The systemd service uses ProtectSystem=strict so
+        # system dirs are still protected; only the home directory is writable.
+        local oc_cfg="${HOME}/.config/opencode/opencode.json"
+        if [[ ! -f "${oc_cfg}" ]]; then
+            cat > "${oc_cfg}" <<'OCEOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "allow"
+}
+OCEOF
+            info "Created ${oc_cfg} (permission: allow)."
+        fi
     fi
     info "Installing ${SERVICE_NAME}.service."
     cat > /tmp/hermesclaw.service <<EOF
@@ -316,7 +325,6 @@ StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
 ReadWritePaths=${rw_paths}
 
 [Install]
@@ -356,7 +364,7 @@ AI-assisted install prompt (paste this to an AI agent):
     npm install -g opencode-ai
   Set OPENCODE_CMD in .env to the detected path (or empty if not found).
   OPENCODE_MODEL defaults to opencode/minimax-m2.5-free (free, no API key).
-  OPENCODE_PERMISSION_STRATEGY defaults to allow_once so headless ACP
+  OPENCODE_PERMISSION_STRATEGY defaults to allow_always so headless ACP
   permission prompts do not block WeChat replies.
 
   If Hermes Agent WeChat gateway is detected, accept the installer's offer

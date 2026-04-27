@@ -286,7 +286,7 @@ def build_opencode_prompt(items, token=""):
 class ACPSession:
     """A single ACP session backed by an opencode acp subprocess."""
 
-    def __init__(self, opencode_cmd, cwd, model, permission_strategy="allow_once"):
+    def __init__(self, opencode_cmd, cwd, model, permission_strategy="allow_always"):
         self.model = model
         self.permission_strategy = permission_strategy
         self.session_id = None
@@ -532,7 +532,7 @@ class OpenCodeBridge:
     """Manages per-user ACPSession instances for OpenCode integration."""
 
     def __init__(self, opencode_cmd, model="opencode/minimax-m2.5-free",
-                 cwd=None, permission_strategy="allow_once"):
+                 cwd=None, permission_strategy="allow_always"):
         self.opencode_cmd = opencode_cmd
         self.model = model
         self.cwd = cwd or str(Path.home())
@@ -1133,7 +1133,7 @@ def main():
     opencode_model = os.getenv("OPENCODE_MODEL", "opencode/minimax-m2.5-free")
     opencode_cmd = os.getenv("OPENCODE_CMD", "/home/ubuntu/.npm-global/bin/opencode")
     opencode_cwd = os.getenv("OPENCODE_CWD", str(Path.home()))
-    opencode_permission_strategy = os.getenv("OPENCODE_PERMISSION_STRATEGY", "allow_once")
+    opencode_permission_strategy = os.getenv("OPENCODE_PERMISSION_STRATEGY", "allow_always")
 
     logging.basicConfig(
         level=logging.INFO,

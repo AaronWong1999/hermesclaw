@@ -272,7 +272,7 @@ rm -rf "$HOME/hermesclaw"
 - **"Not installed" detection** — If `opencode` binary is not found, `/opencode` and `/three` show a helpful install hint instead of crashing.
 - **Tagging in THREE mode** — Proxy tags Hermes/OpenClaw replies; OpenCode worker tags its own replies with `[OpenCode]`.
 - **Dead subprocess recovery** — If OpenCode exits mid-session, pending prompts unblock immediately with an error instead of hanging for the full 120 s timeout.
-- **Headless ACP permissions** — OpenCode permission prompts are handled automatically with `OPENCODE_PERMISSION_STRATEGY=allow_once`, preventing WeChat replies from hanging on non-interactive tool approvals.
+- **Headless ACP permissions** — OpenCode permission prompts are handled automatically with `OPENCODE_PERMISSION_STRATEGY=allow_always`, preventing WeChat replies from hanging on non-interactive tool approvals. The OpenCode global config (`~/.config/opencode/opencode.json`) is also set to `"permission": "allow"` by the installer so tool calls are approved at the OpenCode level without round-tripping through ACP.
 - **OpenCode typing indicator** — OpenCode mode now sends and keeps alive the WeChat typing indicator while the ACP agent is working.
 - **Non-interactive installer** — `bash install.sh -y` (or `HERMESCLAW_YES=1 bash install.sh`) skips all confirmation prompts; OpenCode appears in the discovery summary.
 - **Installer git pull** — Re-running install.sh on an existing install now pulls the latest code before continuing.
