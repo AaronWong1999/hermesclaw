@@ -452,7 +452,12 @@ class ACPSession:
             for option in options:
                 if option.get("kind") == kind:
                     return option.get("optionId")
-        return options[0].get("optionId") if options else None
+        # No recognised kind found — cancel rather than blindly picking options[0],
+        # which could accidentally select a reject/unknown option.
+        if options:
+            unknown_kinds = {o.get("kind") for o in options}
+            log.warning("ACP permission: no recognised option kind in %s; cancelling", unknown_kinds)
+        return None
 
     def _send_wait(self, method, params, timeout=10):
         with self._lock:
