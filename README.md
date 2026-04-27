@@ -26,11 +26,11 @@ Both Hermes Agent and OpenClaw now support WeChat natively — **but you can't r
 
 HermesClaw solves this by becoming the **sole iLink poller**, then running two local proxy servers (for Hermes and OpenClaw) plus a direct ACP bridge (for OpenCode). Each gateway believes it's talking to the real iLink API.
 
-The new OpenCode support also lets you use OpenCode's built-in **Minimax M2.5 Free** model alongside the other two agents, so it can complement them for tasks like fixing their issues, inspecting bugs, or checking the local environment.
+The new OpenCode support also lets you **Vibe Code via WeChat voice messages** — just speak and OpenCode handles it, backed by four free models including MiniMax M2.5 Free. You can also use it alongside the other two agents to complement each other — fixing their issues, tracing bugs, or inspecting the local environment.
 
 现在 Hermes 和 OpenClaw 都原生支持微信了——**但你不能在同一个账号上双开。** 每个 Gateway 会独占 iLink 连接。HermesClaw 解决这个问题：它作为唯一的 iLink 轮询者，运行两个本地代理，让两个 Gateway 各连各的。
 
-新版还增加了 OpenCode 支持，可以把它自带的 **Minimax M2.5 Free** 模型和另外两个 Agent 互相补充使用，比如帮它们修问题、查 bug、看本机环境。
+新版还增加了 OpenCode 支持，现在你可以用微信语音直接进行 **Vibe Coding** 了，调用的就是 OpenCode 中包含 MiniMax M2.5 Free 在内的四个免费模型。你也可以用它和另外两个 Agent 互相补充使用，比如帮它们修问题、查 bug、看本机环境。
 
 ---
 
