@@ -183,6 +183,17 @@ class TestCmd:
         # Route should NOT be changed
         assert s.get("u1") == Route.HERMES
 
+    def test_three_not_installed(self, state_file):
+        """When opencode bridge reports not available, /three shows install hint."""
+        from unittest.mock import MagicMock
+        s = State(state_file)
+        bridge = MagicMock()
+        bridge.is_available.return_value = False
+        r = cmd(s, "u1", "/three", opencode_bridge=bridge)
+        assert "install" in r.lower()
+        # Route should NOT be changed
+        assert s.get("u1") == Route.HERMES
+
     def test_whoami_includes_opencode_commands(self, state_file):
         s = State(state_file)
         r = cmd(s, "u1", "/whoami")
@@ -562,6 +573,63 @@ class TestACPSession:
         result = sess.prompt("anything", timeout=1)
         assert "timeout" in result.lower()
 
+    def test_dead_subprocess_unblocks_prompt(self):
+        """If the ACP subprocess dies mid-prompt, prompt() returns an error quickly."""
+        import os, io, time
+
+        srv_r_fd, cli_w_fd = os.pipe()
+        cli_r_fd, srv_w_fd = os.pipe()
+
+        def _server_dies_after_handshake():
+            r = os.fdopen(srv_r_fd, "r")
+            w = os.fdopen(srv_w_fd, "w")
+            try:
+                for raw in r:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        continue
+                    rid = msg.get("id")
+                    method = msg.get("method", "")
+                    if method == "initialize":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
+                                            "result": {"protocolVersion": 1, "agentCapabilities": {}}}) + "\n")
+                        w.flush()
+                    elif method == "session/new":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
+                                            "result": {"sessionId": "dying-sess", "configOptions": []}}) + "\n")
+                        w.flush()
+                    elif method == "session/prompt":
+                        # Simulate subprocess dying: close stdout without responding
+                        break
+            finally:
+                w.close()  # EOF on stdout → _read_loop exits
+
+        threading.Thread(target=_server_dies_after_handshake, daemon=True).start()
+
+        class _DyingProc:
+            stdin = os.fdopen(cli_w_fd, "wb")
+            stdout = os.fdopen(cli_r_fd, "rb")
+            stderr = io.BytesIO(b"")
+            def terminate(self): pass
+            def wait(self, timeout=None): return 0
+            def kill(self): pass
+
+        with patch("subprocess.Popen", return_value=_DyingProc()):
+            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+
+        t0 = time.monotonic()
+        result = sess.prompt("question", timeout=10)
+        elapsed = time.monotonic() - t0
+
+        # Should return quickly (process died, not wait 10s for timeout)
+        assert elapsed < 5, f"prompt took {elapsed:.1f}s — should have unblocked on EOF"
+        assert "error" in result.lower() or "died" in result.lower()
+        assert sess.alive is False
+
 
 # ── OpenCodeBridge ────────────────────────────────────────────────────────
 
@@ -575,5 +643,12 @@ class TestOpenCodeBridge:
         s = State(state_file)
         bridge = OpenCodeBridge("/nonexistent/opencode")
         r = cmd(s, "u1", "/opencode", opencode_bridge=bridge)
+        assert "install" in r.lower()
+        assert s.get("u1") == Route.HERMES  # route unchanged
+
+    def test_cmd_three_not_installed_gives_hint(self, state_file):
+        s = State(state_file)
+        bridge = OpenCodeBridge("/nonexistent/opencode")
+        r = cmd(s, "u1", "/three", opencode_bridge=bridge)
         assert "install" in r.lower()
         assert s.get("u1") == Route.HERMES  # route unchanged

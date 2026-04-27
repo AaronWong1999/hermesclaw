@@ -139,9 +139,10 @@ class ACPSession:
         self.alive = False
         self._req_id = 0
         self._lock = threading.Lock()
-        self._pending = {}   # req_id -> threading.Event
-        self._results = {}   # req_id -> msg
-        self._text_buf = []  # accumulates text chunks for current prompt
+        self._pending = {}         # req_id -> threading.Event
+        self._results = {}         # req_id -> msg
+        self._text_buf = []        # accumulates text chunks for current prompt
+        self._active_req_id = None # req_id of the in-flight session/prompt
 
         self._proc = subprocess.Popen(
             [opencode_cmd, "acp"],
@@ -199,7 +200,19 @@ class ACPSession:
                     content = upd.get("content", {})
                     if content.get("type") == "text":
                         with self._lock:
-                            self._text_buf.append(content["text"])
+                            if self._active_req_id is not None:
+                                self._text_buf.append(content["text"])
+
+        # EOF or error — mark dead and wake all pending waiters so they
+        # return immediately instead of blocking until their timeout expires.
+        log.warning("ACP read loop exited (subprocess may have died)")
+        with self._lock:
+            self.alive = False
+            dead_error = {"jsonrpc": "2.0", "error": {"code": -32000, "message": "ACP process died"}}
+            for req_id, ev in list(self._pending.items()):
+                self._results[req_id] = dead_error
+                ev.set()
+            self._pending.clear()
 
     def _send_wait(self, method, params, timeout=10):
         with self._lock:
@@ -207,30 +220,60 @@ class ACPSession:
             req_id = self._req_id
             ev = threading.Event()
             self._pending[req_id] = ev
-        raw = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
-        self._proc.stdin.write((raw + "\n").encode())
-        self._proc.stdin.flush()
+        try:
+            raw = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
+            self._proc.stdin.write((raw + "\n").encode())
+            self._proc.stdin.flush()
+        except Exception as e:
+            with self._lock:
+                self._pending.pop(req_id, None)
+                self.alive = False
+            log.warning("ACP stdin write failed (%s): %s", method, e)
+            return {"error": {"code": -32000, "message": f"stdin write failed: {e}"}}
         if ev.wait(timeout):
             with self._lock:
                 return self._results.pop(req_id, None)
         log.warning("ACP timeout waiting for %s (id=%d)", method, req_id)
+        with self._lock:
+            self._pending.pop(req_id, None)
         return None
 
     def prompt(self, text, timeout=120):
         """Send a text prompt; return accumulated response text."""
         with self._lock:
+            self._req_id += 1
+            req_id = self._req_id
+            self._active_req_id = req_id
             self._text_buf.clear()
-        r = self._send_wait("session/prompt", {
-            "sessionId": self.session_id,
-            "prompt": [{"type": "text", "text": text}],
-            "model": self.model,
-        }, timeout=timeout)
-        if r is None:
-            return "[OpenCode: timeout]"
-        if "error" in r:
-            return f"[OpenCode error: {r['error'].get('message', '?')}]"
+            ev = threading.Event()
+            self._pending[req_id] = ev
+        try:
+            raw = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": "session/prompt",
+                               "params": {"sessionId": self.session_id,
+                                          "prompt": [{"type": "text", "text": text}],
+                                          "model": self.model}})
+            self._proc.stdin.write((raw + "\n").encode())
+            self._proc.stdin.flush()
+        except Exception as e:
+            with self._lock:
+                self._pending.pop(req_id, None)
+                self._active_req_id = None
+                self.alive = False
+            return f"[OpenCode error: stdin write failed: {e}]"
+        if ev.wait(timeout):
+            with self._lock:
+                self._active_req_id = None
+                r = self._results.pop(req_id, None)
+                text_out = "".join(self._text_buf).strip()
+            if r is None or "error" in (r or {}):
+                err = (r or {}).get("error", {}).get("message", "unknown error")
+                return f"[OpenCode error: {err}]"
+            return text_out
         with self._lock:
-            return "".join(self._text_buf).strip()
+            self._active_req_id = None
+            self._pending.pop(req_id, None)
+        log.warning("ACP timeout on session/prompt (id=%d)", req_id)
+        return "[OpenCode: timeout]"
 
     def close(self):
         self.alive = False
@@ -326,6 +369,14 @@ def cmd(state, uid, text, opencode_bridge=None):
         state.set(uid, Route.BOTH)
         return "Switched to **Hermes + OpenClaw**."
     if c == "/three":
+        if opencode_bridge is not None and not opencode_bridge.is_available():
+            return (
+                "❌ OpenCode is not installed — /three requires it.\n"
+                "Please install it with:\n"
+                "  npm install -g opencode-ai\n"
+                "Then restart HermesClaw and try /three again.\n"
+                "Tip: use /both for Hermes + OpenClaw only."
+            )
         state.set(uid, Route.THREE)
         return "Switched to **Hermes + OpenClaw + OpenCode** 🔱"
     if c == "/whoami":
