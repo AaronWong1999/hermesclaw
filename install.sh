@@ -281,41 +281,6 @@ install_python_deps() {
     ok "Python dependencies ready."
 }
 
-fix_openclaw_default_model() {
-    ${HAS_OPENCLAW} || return 0
-    local oc_cmd
-    oc_cmd="$(detect_cmd openclaw || true)"
-    [ -n "$oc_cmd" ] || return 0
-
-    local status
-    status="$("$oc_cmd" models status --json 2>/dev/null || true)"
-    [ -n "$status" ] || return 0
-
-    local target
-    target="$(python3 - <<'PY' "$status"
-import json, sys
-try:
-    data = json.loads(sys.argv[1])
-except Exception:
-    sys.exit(0)
-allowed = set(data.get("allowed") or [])
-default = data.get("defaultModel") or data.get("resolvedDefault") or ""
-if default in ("openrouter/free", "openrouter/openrouter/free"):
-    for candidate in ("zai/glm-4.7-flash", "openrouter/openai/gpt-oss-120b:free"):
-        if candidate in allowed:
-            print(candidate)
-            break
-PY
-)"
-    if [ -n "$target" ]; then
-        warn "OpenClaw default model is openrouter/free, which can return 404 for tool use."
-        info "Switching OpenClaw default model to ${target}."
-        "$oc_cmd" models set "$target" >/dev/null 2>&1 && \
-            ok "OpenClaw default model set to ${target}." || \
-            warn "Could not update OpenClaw default model automatically."
-    fi
-}
-
 # ── systemd ───────────────────────────────────────────────────────────────
 
 install_systemd_service() {
@@ -598,7 +563,6 @@ if ${HAS_OC_GW}; then
 fi
 
 # 10) systemd service.
-fix_openclaw_default_model
 install_systemd_service
 
 echo ""
