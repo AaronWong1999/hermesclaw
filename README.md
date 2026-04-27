@@ -26,7 +26,11 @@ Both Hermes Agent and OpenClaw now support WeChat natively — **but you can't r
 
 HermesClaw solves this by becoming the **sole iLink poller**, then running two local proxy servers (for Hermes and OpenClaw) plus a direct ACP bridge (for OpenCode). Each gateway believes it's talking to the real iLink API.
 
+The new OpenCode support also lets you use OpenCode's built-in **Minimax M2.5 Free** model alongside the other two agents, so it can complement them for tasks like fixing their issues, inspecting bugs, or checking the local environment.
+
 现在 Hermes 和 OpenClaw 都原生支持微信了——**但你不能在同一个账号上双开。** 每个 Gateway 会独占 iLink 连接。HermesClaw 解决这个问题：它作为唯一的 iLink 轮询者，运行两个本地代理，让两个 Gateway 各连各的。
+
+新版还增加了 OpenCode 支持，可以把它自带的 **Minimax M2.5 Free** 模型和另外两个 Agent 互相补充使用，比如帮它们修问题、查 bug、看本机环境。
 
 ---
 
@@ -268,9 +272,11 @@ rm -rf "$HOME/hermesclaw"
 - **"Not installed" detection** — If `opencode` binary is not found, `/opencode` and `/three` show a helpful install hint instead of crashing.
 - **Tagging in THREE mode** — Proxy tags Hermes/OpenClaw replies; OpenCode worker tags its own replies with `[OpenCode]`.
 - **Dead subprocess recovery** — If OpenCode exits mid-session, pending prompts unblock immediately with an error instead of hanging for the full 120 s timeout.
+- **Headless ACP permissions** — OpenCode permission prompts are handled automatically with `OPENCODE_PERMISSION_STRATEGY=allow_once`, preventing WeChat replies from hanging on non-interactive tool approvals.
+- **OpenCode typing indicator** — OpenCode mode now sends and keeps alive the WeChat typing indicator while the ACP agent is working.
 - **Non-interactive installer** — `bash install.sh -y` (or `HERMESCLAW_YES=1 bash install.sh`) skips all confirmation prompts; OpenCode appears in the discovery summary.
 - **Installer git pull** — Re-running install.sh on an existing install now pulls the latest code before continuing.
-- **82 tests** — 24 new tests covering new routes, ACPSession mock server, OpenCodeBridge, dead-subprocess recovery, voice-to-OpenCode, and THREE mode.
+- **117 tests** — Expanded route matrix covers every command route across text, voice, image, video, and file payloads, plus ACP permissions, OpenCode media prompts, dead-subprocess recovery, and THREE mode.
 
 ### v0.2.1 (2026-04-12)
 

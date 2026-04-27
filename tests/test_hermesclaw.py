@@ -1,6 +1,7 @@
 """Tests for core hermesclaw logic: State, cmd(), extract_text, routing."""
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from hermesclaw import (
     MessageQueue,
     OpenCodeBridge,
     ACPSession,
+    build_opencode_prompt,
 )
 
 
@@ -425,6 +427,87 @@ class TestProcMsg:
         assert oq.size() == 1
         assert ocode_q.qsize() == 1
 
+    @pytest.mark.parametrize("command,expected", [
+        ("/hermes", Route.HERMES),
+        ("/openclaw", Route.OPENCLAW),
+        ("/opencode", Route.OPENCODE),
+        ("/both", Route.BOTH),
+        ("/three", Route.THREE),
+    ])
+    def test_all_switch_commands_are_not_forwarded(self, state_file, make_ilink_msg,
+                                                   command, expected):
+        import queue as stdlib_queue
+        s = State(state_file)
+        s.mark_status_shown("user123")
+        hq, oq = MessageQueue(), MessageQueue()
+        ocode_q = stdlib_queue.Queue()
+        with patch("hermesclaw.send_text_ilink") as mock_send:
+            proc_msg(
+                make_ilink_msg(text=command),
+                s,
+                "http://fake",
+                "tok",
+                hq,
+                oq,
+                ocode_q,
+            )
+        assert mock_send.called
+        assert s.get("user123") == expected
+        assert hq.size() == 0
+        assert oq.size() == 0
+        assert ocode_q.qsize() == 0
+
+    def test_whoami_is_not_forwarded(self, state_file, make_ilink_msg):
+        import queue as stdlib_queue
+        s = State(state_file)
+        s.mark_status_shown("user123")
+        hq, oq = MessageQueue(), MessageQueue()
+        ocode_q = stdlib_queue.Queue()
+        with patch("hermesclaw.send_text_ilink") as mock_send:
+            proc_msg(make_ilink_msg(text="/whoami"), s, "http://fake", "tok", hq, oq, ocode_q)
+        assert mock_send.called
+        assert hq.size() == 0
+        assert oq.size() == 0
+        assert ocode_q.qsize() == 0
+
+    @pytest.mark.parametrize("route,expected_h,expected_o,expected_c", [
+        (Route.HERMES, 1, 0, 0),
+        (Route.OPENCLAW, 0, 1, 0),
+        (Route.OPENCODE, 0, 0, 1),
+        (Route.BOTH, 1, 1, 0),
+        (Route.THREE, 1, 1, 1),
+    ])
+    @pytest.mark.parametrize("items", [
+        [{"type": 1, "text_item": {"text": "text payload"}}],
+        [{"type": 3, "voice_item": {"text": "voice payload"}}],
+        [{"type": 2, "image_item": {"image_url": "https://example.com/a.jpg"}}],
+        [{"type": 4, "video_item": {"video_url": "https://example.com/a.mp4"}}],
+        [{"type": 5, "file_item": {"file_url": "https://example.com/a.pdf", "file_name": "a.pdf"}}],
+    ])
+    def test_route_matrix_for_all_message_item_types(
+        self, state_file, make_ilink_msg, route, expected_h, expected_o, expected_c, items, caplog
+    ):
+        import queue as stdlib_queue
+        s = State(state_file)
+        s.set("user123", route)
+        s.mark_status_shown("user123")
+        hq, oq = MessageQueue(), MessageQueue()
+        ocode_q = stdlib_queue.Queue()
+        with caplog.at_level(logging.INFO, logger="hermesclaw"), patch("hermesclaw.send_text_ilink"):
+            proc_msg(
+                make_ilink_msg(items=items),
+                s,
+                "http://fake",
+                "tok",
+                hq,
+                oq,
+                ocode_q,
+            )
+        assert hq.size() == expected_h
+        assert oq.size() == expected_o
+        assert ocode_q.qsize() == expected_c
+        assert f"types={items[0]['type']}" in caplog.text
+
 
 # ── opencode_worker ───────────────────────────────────────────────────────
 
@@ -484,17 +567,39 @@ class TestOpenCodeWorker:
         assert "voice message" in txt.lower()
 
     def test_empty_non_text_message_is_skipped(self, state_file):
-        """Non-text messages with no extractable text are skipped gracefully."""
+        """Media-only messages build OpenCode content blocks instead of disappearing."""
         import hermesclaw as hc
-        # Image-only message (type != 1 or 3, no text)
         msg = {
             "from_user_id": "u1",
             "message_type": 1,
-            "item_list": [{"type": 4, "image_item": {"cdn_url": "https://example.com"}}],
+            "item_list": [{"type": 2, "image_item": {"cdn_url": "https://example.com/a.jpg"}}],
             "context_token": "ctx",
         }
         txt = hc.extract_text(msg.get("item_list", []))
-        assert txt == ""  # should be empty, worker will skip
+        assert txt == ""
+        with patch("hermesclaw._download_media", return_value=(None, "", "offline")):
+            blocks = build_opencode_prompt(msg["item_list"])
+        assert blocks[0]["type"] == "text"
+        assert blocks[1]["type"] == "resource_link"
+        assert blocks[1]["uri"] == "https://example.com/a.jpg"
+
+    def test_image_prompt_prefers_acp_image_when_downloadable(self):
+        item = {"type": 2, "image_item": {"image_url": "https://example.com/a.png"}}
+        with patch("hermesclaw._download_media", return_value=(b"png-bytes", "image/png", None)):
+            blocks = build_opencode_prompt([item])
+        assert blocks[0]["type"] == "text"
+        assert blocks[1]["type"] == "image"
+        assert blocks[1]["mimeType"] == "image/png"
+
+    @pytest.mark.parametrize("item,expected_kind", [
+        ({"type": 4, "video_item": {"video_url": "https://example.com/a.mp4"}}, "video"),
+        ({"type": 5, "file_item": {"file_url": "https://example.com/a.pdf", "file_name": "a.pdf"}}, "file"),
+    ])
+    def test_video_and_file_prompt_use_resource_links(self, item, expected_kind):
+        blocks = build_opencode_prompt([item])
+        assert expected_kind in blocks[0]["text"]
+        assert blocks[1]["type"] == "resource_link"
+        assert blocks[1]["uri"].startswith("https://example.com/")
 
 
 class TestACPSession:
@@ -596,6 +701,88 @@ class TestACPSession:
             sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
         result = sess.prompt("test question")
         assert result == "hello from mock opencode"
+
+    def test_permission_request_is_auto_selected(self):
+        """ACP permission prompts are answered so headless sessions do not hang."""
+        import os, io
+
+        srv_r_fd, cli_w_fd = os.pipe()
+        cli_r_fd, srv_w_fd = os.pipe()
+        observed_permission = {}
+
+        def _permission_server():
+            r = os.fdopen(srv_r_fd, "r")
+            w = os.fdopen(srv_w_fd, "w")
+            pending_permission = False
+            prompt_id = None
+            try:
+                for raw in r:
+                    msg = json.loads(raw.strip())
+                    rid = msg.get("id")
+                    method = msg.get("method", "")
+                    if method == "initialize":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
+                                            "result": {"protocolVersion": 1, "agentCapabilities": {}}}) + "\n")
+                        w.flush()
+                    elif method == "session/new":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
+                                            "result": {"sessionId": "perm-sess", "configOptions": []}}) + "\n")
+                        w.flush()
+                    elif method == "session/prompt":
+                        prompt_id = rid
+                        pending_permission = True
+                        w.write(json.dumps({
+                            "jsonrpc": "2.0",
+                            "id": 99,
+                            "method": "session/request_permission",
+                            "params": {
+                                "sessionId": "perm-sess",
+                                "toolCall": {"toolCallId": "call-1", "title": "Read /etc", "kind": "read"},
+                                "options": [
+                                    {"optionId": "allow", "name": "Allow once", "kind": "allow_once"},
+                                    {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
+                                ],
+                            },
+                        }) + "\n")
+                        w.flush()
+                    elif rid == 99 and "result" in msg:
+                        observed_permission.update(msg["result"])
+                        notif = {
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": "perm-sess",
+                                "update": {
+                                    "sessionUpdate": "agent_message_chunk",
+                                    "content": {"type": "text", "text": "permission ok"},
+                                },
+                            },
+                        }
+                        w.write(json.dumps(notif) + "\n")
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": prompt_id,
+                                            "result": {"stopReason": "end_turn"}}) + "\n")
+                        w.flush()
+                        pending_permission = False
+                assert not pending_permission
+            finally:
+                w.close()
+
+        threading.Thread(target=_permission_server, daemon=True).start()
+
+        class _PermissionProc:
+            stdin = os.fdopen(cli_w_fd, "wb")
+            stdout = os.fdopen(cli_r_fd, "rb")
+            stderr = io.BytesIO(b"")
+            def terminate(self): pass
+            def wait(self, timeout=None): return 0
+            def kill(self): pass
+
+        with patch("subprocess.Popen", return_value=_PermissionProc()):
+            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+        result = sess.prompt("needs permission", timeout=3)
+        assert result == "permission ok"
+        assert observed_permission["outcome"]["outcome"] == "selected"
+        assert observed_permission["outcome"]["optionId"] == "allow"
 
     def test_prompt_timeout_returns_error_string(self):
         """When ACP server doesn't respond in time, return error string."""

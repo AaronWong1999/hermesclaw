@@ -8,6 +8,8 @@ directly to the iLink API.
 
 import json
 import logging
+import base64
+import mimetypes
 import os
 import queue
 import secrets
@@ -28,11 +30,12 @@ import requests
 # Constants
 # ---------------------------------------------------------------------------
 
-T, VO = 1, 3  # iLink message types: text, voice
+T, IMG, VO, VIDEO, FILE = 1, 2, 3, 4, 5
 ILINK_VER = "2.1.7"
 ILINK_CV = "65547"
 QUEUE_CAP = 200
 DEFAULT_POLL_SEC = 35
+MAX_OPENCODE_MEDIA_BYTES = 10 * 1024 * 1024
 
 log = logging.getLogger("hermesclaw")
 
@@ -125,6 +128,143 @@ def extract_text(items):
     return "\n".join(parts).strip()
 
 
+def media_kind(tp):
+    return {
+        IMG: "image",
+        VIDEO: "video",
+        FILE: "file",
+    }.get(tp, f"type-{tp}")
+
+
+def _walk_values(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k, v
+            yield from _walk_values(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_values(v)
+
+
+def _first_value_by_keys(obj, keys):
+    wanted = {k.lower() for k in keys}
+    for k, v in _walk_values(obj):
+        if str(k).lower() in wanted and v not in (None, ""):
+            return str(v)
+    return ""
+
+
+def _first_url(obj):
+    for _, v in _walk_values(obj):
+        if isinstance(v, str) and v.startswith(("http://", "https://")):
+            return v
+    return ""
+
+
+def _media_name(item, kind, url):
+    name = _first_value_by_keys(item, ("name", "filename", "file_name", "title"))
+    if name:
+        return name
+    if url:
+        tail = url.rstrip("/").rsplit("/", 1)[-1].split("?", 1)[0]
+        if tail:
+            return tail
+    return f"wechat-{kind}"
+
+
+def _media_mime(item, kind, url):
+    mime = _first_value_by_keys(item, ("mime_type", "mimeType", "content_type", "contentType"))
+    if mime:
+        return mime
+    guessed, _ = mimetypes.guess_type(url or _media_name(item, kind, url))
+    if guessed:
+        return guessed
+    return {
+        "image": "image/jpeg",
+        "video": "video/mp4",
+        "file": "application/octet-stream",
+    }.get(kind, "application/octet-stream")
+
+
+def _download_media(url, token):
+    if not url:
+        return None, "", None
+    try:
+        headers = hdrs(token)
+        r = requests.get(url, headers=headers, timeout=20, stream=True)
+        r.raise_for_status()
+        chunks = []
+        size = 0
+        for chunk in r.iter_content(chunk_size=65536):
+            if not chunk:
+                continue
+            size += len(chunk)
+            if size > MAX_OPENCODE_MEDIA_BYTES:
+                return None, "", f"media exceeds {MAX_OPENCODE_MEDIA_BYTES} bytes"
+            chunks.append(chunk)
+        return b"".join(chunks), r.headers.get("Content-Type", "").split(";", 1)[0], None
+    except Exception as e:
+        return None, "", str(e)
+
+
+def build_opencode_prompt(items, token=""):
+    """Build ACP content blocks from iLink items for OpenCode."""
+    blocks = []
+    txt = extract_text(items)
+    if txt:
+        blocks.append({"type": "text", "text": txt})
+
+    for item in items:
+        tp = item.get("type", 0)
+        if tp in (T, VO) or tp == 0:
+            continue
+        kind = media_kind(tp)
+        url = _first_url(item)
+        name = _media_name(item, kind, url)
+        mime = _media_mime(item, kind, url)
+        metadata = {
+            "kind": kind,
+            "name": name,
+            "mimeType": mime,
+            "url": url or None,
+            "itemType": tp,
+        }
+        blocks.append({
+            "type": "text",
+            "text": (
+                f"The user sent a {kind}. Use the attached content or link if available. "
+                f"Metadata: {json.dumps(metadata, ensure_ascii=False)}"
+            ),
+        })
+
+        if kind == "image" and url:
+            data, content_type, err = _download_media(url, token)
+            if data:
+                blocks.append({
+                    "type": "image",
+                    "data": base64.b64encode(data).decode(),
+                    "mimeType": content_type or mime,
+                    "uri": url,
+                })
+                continue
+            log.info("OpenCode image download unavailable (%s): %s", url[:80], err)
+
+        if url:
+            block = {
+                "type": "resource_link",
+                "name": name,
+                "uri": url,
+                "mimeType": mime,
+                "title": name,
+            }
+            size = _first_value_by_keys(item, ("size", "file_size", "fileSize"))
+            if size and size.isdigit():
+                block["size"] = int(size)
+            blocks.append(block)
+
+    return blocks
+
+
 # ---------------------------------------------------------------------------
 # OpenCode ACP bridge
 # ---------------------------------------------------------------------------
@@ -133,25 +273,32 @@ def extract_text(items):
 class ACPSession:
     """A single ACP session backed by an opencode acp subprocess."""
 
-    def __init__(self, opencode_cmd, cwd, model):
+    def __init__(self, opencode_cmd, cwd, model, permission_strategy="allow_once"):
         self.model = model
+        self.permission_strategy = permission_strategy
         self.session_id = None
+        self.prompt_capabilities = {}
         self.alive = False
         self._req_id = 0
         self._lock = threading.Lock()
+        self._write_lock = threading.Lock()
         self._pending = {}         # req_id -> threading.Event
         self._results = {}         # req_id -> msg
         self._text_buf = []        # accumulates text chunks for current prompt
         self._active_req_id = None # req_id of the in-flight session/prompt
+        self._stderr_tail = []
 
         self._proc = subprocess.Popen(
             [opencode_cmd, "acp"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=cwd,
         )
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
+        self._stderr_reader = threading.Thread(target=self._read_stderr_loop, daemon=True)
+        self._stderr_reader.start()
 
         # ACP handshake
         r = self._send_wait("initialize", {
@@ -165,6 +312,11 @@ class ACPSession:
         }, timeout=15)
         if not r or "error" in r:
             raise RuntimeError(f"ACP initialize failed: {r}")
+        self.prompt_capabilities = (
+            r.get("result", {})
+            .get("agentCapabilities", {})
+            .get("promptCapabilities", {})
+        )
 
         r = self._send_wait("session/new", {
             "cwd": cwd,
@@ -188,7 +340,9 @@ class ACPSession:
             except Exception:
                 break
 
-            if "id" in msg:
+            if "method" in msg and "id" in msg:
+                self._handle_agent_request(msg)
+            elif "id" in msg:
                 with self._lock:
                     self._results[msg["id"]] = msg
                     ev = self._pending.pop(msg["id"], None)
@@ -205,14 +359,87 @@ class ACPSession:
 
         # EOF or error — mark dead and wake all pending waiters so they
         # return immediately instead of blocking until their timeout expires.
-        log.warning("ACP read loop exited (subprocess may have died)")
+        stderr = self._stderr_snapshot()
+        if stderr:
+            log.warning("ACP read loop exited (subprocess may have died). stderr tail: %s", stderr)
+        else:
+            log.warning("ACP read loop exited (subprocess may have died)")
         with self._lock:
             self.alive = False
-            dead_error = {"jsonrpc": "2.0", "error": {"code": -32000, "message": "ACP process died"}}
+            message = "ACP process died"
+            if stderr:
+                message += f": {stderr}"
+            dead_error = {"jsonrpc": "2.0", "error": {"code": -32000, "message": message}}
             for req_id, ev in list(self._pending.items()):
                 self._results[req_id] = dead_error
                 ev.set()
             self._pending.clear()
+
+    def _read_stderr_loop(self):
+        while True:
+            try:
+                line = self._proc.stderr.readline()
+                if not line:
+                    break
+                text = line.decode(errors="replace").strip()
+                if not text:
+                    continue
+                with self._lock:
+                    self._stderr_tail.append(text)
+                    self._stderr_tail = self._stderr_tail[-20:]
+            except Exception:
+                break
+
+    def _stderr_snapshot(self):
+        with self._lock:
+            return " | ".join(self._stderr_tail[-8:])
+
+    def _write_message(self, msg):
+        raw = json.dumps(msg)
+        with self._write_lock:
+            self._proc.stdin.write((raw + "\n").encode())
+            self._proc.stdin.flush()
+
+    def _handle_agent_request(self, msg):
+        method = msg.get("method")
+        req_id = msg.get("id")
+        if method == "session/request_permission":
+            option_id = self._select_permission_option(
+                msg.get("params", {}).get("options", [])
+            )
+            if option_id:
+                result = {"outcome": {"outcome": "selected", "optionId": option_id}}
+            else:
+                result = {"outcome": {"outcome": "cancelled"}}
+            log.info("ACP permission request handled with option=%s", option_id or "cancelled")
+            try:
+                self._write_message({"jsonrpc": "2.0", "id": req_id, "result": result})
+            except Exception as e:
+                log.warning("ACP permission response failed: %s", e)
+            return
+
+        log.warning("ACP unsupported agent request: %s", method)
+        try:
+            self._write_message({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": f"Unsupported client method: {method}"},
+            })
+        except Exception as e:
+            log.warning("ACP unsupported-request response failed: %s", e)
+
+    def _select_permission_option(self, options):
+        preferred = {
+            "allow_always": ("allow_always", "allow_once"),
+            "allow_once": ("allow_once", "allow_always"),
+            "reject_once": ("reject_once", "reject_always"),
+            "reject_always": ("reject_always", "reject_once"),
+        }.get(self.permission_strategy, ("allow_once", "allow_always"))
+        for kind in preferred:
+            for option in options:
+                if option.get("kind") == kind:
+                    return option.get("optionId")
+        return options[0].get("optionId") if options else None
 
     def _send_wait(self, method, params, timeout=10):
         with self._lock:
@@ -221,9 +448,7 @@ class ACPSession:
             ev = threading.Event()
             self._pending[req_id] = ev
         try:
-            raw = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
-            self._proc.stdin.write((raw + "\n").encode())
-            self._proc.stdin.flush()
+            self._write_message({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
         except Exception as e:
             with self._lock:
                 self._pending.pop(req_id, None)
@@ -238,8 +463,8 @@ class ACPSession:
             self._pending.pop(req_id, None)
         return None
 
-    def prompt(self, text, timeout=120):
-        """Send a text prompt; return accumulated response text."""
+    def prompt_blocks(self, blocks, timeout=120):
+        """Send ACP content blocks; return accumulated response text."""
         with self._lock:
             self._req_id += 1
             req_id = self._req_id
@@ -248,12 +473,10 @@ class ACPSession:
             ev = threading.Event()
             self._pending[req_id] = ev
         try:
-            raw = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": "session/prompt",
-                               "params": {"sessionId": self.session_id,
-                                          "prompt": [{"type": "text", "text": text}],
-                                          "model": self.model}})
-            self._proc.stdin.write((raw + "\n").encode())
-            self._proc.stdin.flush()
+            self._write_message({"jsonrpc": "2.0", "id": req_id, "method": "session/prompt",
+                                 "params": {"sessionId": self.session_id,
+                                            "prompt": blocks,
+                                            "model": self.model}})
         except Exception as e:
             with self._lock:
                 self._pending.pop(req_id, None)
@@ -275,6 +498,10 @@ class ACPSession:
         log.warning("ACP timeout on session/prompt (id=%d)", req_id)
         return "[OpenCode: timeout]"
 
+    def prompt(self, text, timeout=120):
+        """Send a text prompt; return accumulated response text."""
+        return self.prompt_blocks([{"type": "text", "text": text}], timeout)
+
     def close(self):
         self.alive = False
         try:
@@ -290,28 +517,41 @@ class ACPSession:
 class OpenCodeBridge:
     """Manages per-user ACPSession instances for OpenCode integration."""
 
-    def __init__(self, opencode_cmd, model="opencode/minimax-m2.5-free", cwd=None):
+    def __init__(self, opencode_cmd, model="opencode/minimax-m2.5-free",
+                 cwd=None, permission_strategy="allow_once"):
         self.opencode_cmd = opencode_cmd
         self.model = model
         self.cwd = cwd or str(Path.home())
+        self.permission_strategy = permission_strategy
         self._sessions = {}   # uid -> ACPSession
         self._lock = threading.Lock()
 
     def is_available(self):
         """Return True if the opencode binary is found."""
-        return bool(shutil.which(self.opencode_cmd) or os.path.isfile(self.opencode_cmd))
+        resolved = shutil.which(self.opencode_cmd)
+        return bool(resolved or os.access(self.opencode_cmd, os.X_OK))
 
     def send(self, uid, text, timeout=120):
         """Route text to this user's ACP session; return response."""
         session = self._get_or_create(uid)
         return session.prompt(text, timeout)
 
+    def send_blocks(self, uid, blocks, timeout=120):
+        """Route ACP content blocks to this user's ACP session; return response."""
+        session = self._get_or_create(uid)
+        return session.prompt_blocks(blocks, timeout)
+
     def _get_or_create(self, uid):
         with self._lock:
             s = self._sessions.get(uid)
             if s is None or not s.alive:
                 log.info("Creating OpenCode session for %s", uid[:16])
-                s = ACPSession(self.opencode_cmd, self.cwd, self.model)
+                s = ACPSession(
+                    self.opencode_cmd,
+                    self.cwd,
+                    self.model,
+                    self.permission_strategy,
+                )
                 self._sessions[uid] = s
         return s
 
@@ -454,6 +694,54 @@ def send_text_ilink(base_url, tok, to_user, text, ctx=None):
         {"msg": m, "base_info": {"channel_version": ILINK_VER}},
         tok,
     )
+
+
+def get_typing_ticket(base_url, tok, to_user, ctx=None):
+    """Fetch iLink typing ticket for a user."""
+    body = {
+        "ilink_user_id": to_user,
+        "base_info": {"channel_version": ILINK_VER},
+    }
+    if ctx:
+        body["context_token"] = ctx
+    resp = ilink_post(base_url, "ilink/bot/getconfig", body, tok, to=10)
+    return resp.get("typing_ticket", "")
+
+
+def send_typing_ilink(base_url, tok, to_user, typing_ticket, status=1):
+    """Send or cancel iLink typing status."""
+    return ilink_post(
+        base_url,
+        "ilink/bot/sendtyping",
+        {
+            "ilink_user_id": to_user,
+            "typing_ticket": typing_ticket,
+            "status": status,
+            "base_info": {"channel_version": ILINK_VER},
+        },
+        tok,
+        to=10,
+    )
+
+
+def keep_typing_ilink(base_url, tok, to_user, ctx, stop_event, interval=5):
+    """Keep iLink typing status alive until stop_event is set."""
+    ticket = ""
+    try:
+        ticket = get_typing_ticket(base_url, tok, to_user, ctx)
+        if not ticket:
+            return
+        while not stop_event.is_set():
+            send_typing_ilink(base_url, tok, to_user, ticket, status=1)
+            stop_event.wait(interval)
+    except Exception as e:
+        log.debug("typing keepalive failed for %s: %s", to_user[:16], e)
+    finally:
+        if ticket:
+            try:
+                send_typing_ilink(base_url, tok, to_user, ticket, status=2)
+            except Exception as e:
+                log.debug("typing cancel failed for %s: %s", to_user[:16], e)
 
 
 # ---------------------------------------------------------------------------
@@ -675,12 +963,20 @@ def opencode_worker(bridge, q, base_url, token, state):
     while True:
         try:
             uid, msg = q.get()
-            txt = extract_text(msg.get("item_list", []))
-            if not txt:
-                continue
+            items = msg.get("item_list", [])
+            blocks = build_opencode_prompt(items, token)
             route = state.get(uid)
+            if not blocks:
+                continue
+            stop_typing = threading.Event()
+            typing_thread = threading.Thread(
+                target=keep_typing_ilink,
+                args=(base_url, token, uid, msg.get("context_token"), stop_typing),
+                daemon=True,
+            )
+            typing_thread.start()
             try:
-                reply = bridge.send(uid, txt)
+                reply = bridge.send_blocks(uid, blocks)
                 if reply:
                     tag = "[OpenCode] " if route == Route.THREE else ""
                     send_text_ilink(
@@ -696,6 +992,8 @@ def opencode_worker(bridge, q, base_url, token, state):
                                     msg.get("context_token"))
                 except Exception:
                     pass
+            finally:
+                stop_typing.set()
         except Exception as e:
             log.error("opencode_worker: %s", e, exc_info=True)
 
@@ -708,7 +1006,8 @@ def proc_msg(msg, state, base_url, token, hermes_q, openclaw_q,
     items = msg.get("item_list", [])
     if msg.get("message_type", 1) != 1:
         return
-    log.info("Msg from=%s... items=%d", uid[:16], len(items))
+    item_types = ",".join(str(it.get("type", 0)) for it in items)
+    log.info("Msg from=%s... items=%d types=%s", uid[:16], len(items), item_types)
 
     txt = extract_text(items)
     has_any = txt or any(it.get("type", 0) != 0 for it in items)
@@ -801,6 +1100,7 @@ def main():
     opencode_model = os.getenv("OPENCODE_MODEL", "opencode/minimax-m2.5-free")
     opencode_cmd = os.getenv("OPENCODE_CMD", "/home/ubuntu/.npm-global/bin/opencode")
     opencode_cwd = os.getenv("OPENCODE_CWD", str(Path.home()))
+    opencode_permission_strategy = os.getenv("OPENCODE_PERMISSION_STRATEGY", "allow_once")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -851,7 +1151,12 @@ def main():
         log.info("OpenClaw proxy started on :%d", oc_port)
 
     if opencode_on:
-        opencode_bridge = OpenCodeBridge(opencode_cmd, opencode_model, opencode_cwd)
+        opencode_bridge = OpenCodeBridge(
+            opencode_cmd,
+            opencode_model,
+            opencode_cwd,
+            opencode_permission_strategy,
+        )
         if opencode_bridge.is_available():
             opencode_q = queue.Queue()
             threading.Thread(

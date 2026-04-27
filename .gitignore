@@ -11,6 +11,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.venv/
 
 # Old v1 backup
 hermesclaw_v1.py

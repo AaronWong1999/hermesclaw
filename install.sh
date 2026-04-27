@@ -43,6 +43,23 @@ need_cmd() {
 }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+detect_cmd() {
+    local resolved
+    resolved="$(command -v "$1" 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+        echo "$resolved"
+        return 0
+    fi
+    if [ -x "${HOME}/.npm-global/bin/$1" ]; then
+        echo "${HOME}/.npm-global/bin/$1"
+        return 0
+    fi
+    if [ -x "${HOME}/.$1/bin/$1" ]; then
+        echo "${HOME}/.$1/bin/$1"
+        return 0
+    fi
+    return 1
+}
 
 need_cmd python3
 need_cmd git
@@ -246,6 +263,7 @@ OPENCLAW_ENABLED=${oc_on}
 OPENCODE_ENABLED=${OPENCODE_ENABLED}
 OPENCODE_CMD=${OPENCODE_CMD}
 OPENCODE_MODEL=${OPENCODE_MODEL}
+OPENCODE_PERMISSION_STRATEGY=${OPENCODE_PERMISSION_STRATEGY:-allow_once}
 STATE_FILE=${PROJECT_DIR}/router_state.json
 LOG_FILE=${PROJECT_DIR}/hermesclaw.log
 LONG_POLL_TIMEOUT=35
@@ -263,6 +281,41 @@ install_python_deps() {
     ok "Python dependencies ready."
 }
 
+fix_openclaw_default_model() {
+    ${HAS_OPENCLAW} || return 0
+    local oc_cmd
+    oc_cmd="$(detect_cmd openclaw || true)"
+    [ -n "$oc_cmd" ] || return 0
+
+    local status
+    status="$("$oc_cmd" models status --json 2>/dev/null || true)"
+    [ -n "$status" ] || return 0
+
+    local target
+    target="$(python3 - <<'PY' "$status"
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(0)
+allowed = set(data.get("allowed") or [])
+default = data.get("defaultModel") or data.get("resolvedDefault") or ""
+if default in ("openrouter/free", "openrouter/openrouter/free"):
+    for candidate in ("zai/glm-4.7-flash", "openrouter/openai/gpt-oss-120b:free"):
+        if candidate in allowed:
+            print(candidate)
+            break
+PY
+)"
+    if [ -n "$target" ]; then
+        warn "OpenClaw default model is openrouter/free, which can return 404 for tool use."
+        info "Switching OpenClaw default model to ${target}."
+        "$oc_cmd" models set "$target" >/dev/null 2>&1 && \
+            ok "OpenClaw default model set to ${target}." || \
+            warn "Could not update OpenClaw default model automatically."
+    fi
+}
+
 # ── systemd ───────────────────────────────────────────────────────────────
 
 install_systemd_service() {
@@ -271,6 +324,15 @@ install_systemd_service() {
         return 0
     }
     need_cmd systemctl
+    local rw_paths="${PROJECT_DIR}"
+    if [[ "${OPENCODE_ENABLED:-false}" == "true" ]]; then
+        mkdir -p \
+            "${HOME}/.config/opencode" \
+            "${HOME}/.local/share/opencode" \
+            "${HOME}/.local/state/opencode" \
+            "${HOME}/.cache/opencode"
+        rw_paths="${rw_paths} ${HOME}/.config/opencode ${HOME}/.local/share/opencode ${HOME}/.local/state/opencode ${HOME}/.cache/opencode"
+    fi
     info "Installing ${SERVICE_NAME}.service."
     cat > /tmp/hermesclaw.service <<EOF
 [Unit]
@@ -290,7 +352,7 @@ StandardError=journal
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=${PROJECT_DIR}
+ReadWritePaths=${rw_paths}
 
 [Install]
 WantedBy=multi-user.target
@@ -325,10 +387,12 @@ AI-assisted install prompt (paste this to an AI agent):
   systemd service.
 
   Also detect OpenCode CLI: run `command -v opencode` or check
-  ~/.npm-global/bin/opencode.  If not found, suggest installing with:
+  ~/.npm-global/bin/opencode and ~/.opencode/bin/opencode.  If not found, suggest installing with:
     npm install -g opencode-ai
   Set OPENCODE_CMD in .env to the detected path (or empty if not found).
   OPENCODE_MODEL defaults to opencode/minimax-m2.5-free (free, no API key).
+  OPENCODE_PERMISSION_STRATEGY defaults to allow_once so headless ACP
+  permission prompts do not block WeChat replies.
 
   If Hermes Agent WeChat gateway is detected, accept the installer's offer
   to patch weixin.py to disable newline-based message splitting
@@ -380,8 +444,8 @@ HERMES_ENV_FILE=""
 HERMES_ENV_FILE="$(detect_hermes_env_file 2>/dev/null || true)"
 
 # ── OpenCode detection ────────────────────────────────────────────────────
-if command -v opencode &>/dev/null || [ -x "$HOME/.npm-global/bin/opencode" ]; then
-    OPENCODE_CMD=$(command -v opencode 2>/dev/null || echo "$HOME/.npm-global/bin/opencode")
+OPENCODE_CMD="$(detect_cmd opencode || true)"
+if [ -n "$OPENCODE_CMD" ]; then
     info "OpenCode found: $OPENCODE_CMD"
     OPENCODE_ENABLED=true
 else
@@ -534,6 +598,7 @@ if ${HAS_OC_GW}; then
 fi
 
 # 10) systemd service.
+fix_openclaw_default_model
 install_systemd_service
 
 echo ""
