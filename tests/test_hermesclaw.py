@@ -17,6 +17,8 @@ from hermesclaw import (
     route_message,
     proc_msg,
     MessageQueue,
+    OpenCodeBridge,
+    ACPSession,
 )
 
 
@@ -143,7 +145,7 @@ class TestCmd:
         s = State(state_file)
         s.set("u1", Route.OPENCLAW)
         r = cmd(s, "u1", "/whoami")
-        assert "HermesClaw v2" in r
+        assert "HermesClaw v3" in r
         assert "OpenClaw" in r
 
     def test_passthrough(self, state_file):
@@ -158,6 +160,35 @@ class TestCmd:
         s = State(state_file)
         assert cmd(s, "u1", " /hermes ") is not None
 
+    def test_opencode(self, state_file):
+        s = State(state_file)
+        r = cmd(s, "u1", "/opencode")
+        assert "OpenCode" in r
+        assert s.get("u1") == Route.OPENCODE
+
+    def test_three(self, state_file):
+        s = State(state_file)
+        r = cmd(s, "u1", "/three")
+        assert "three" in r.lower() or "OpenCode" in r
+        assert s.get("u1") == Route.THREE
+
+    def test_opencode_not_installed(self, state_file):
+        """When opencode bridge reports not available, show install hint."""
+        from unittest.mock import MagicMock
+        s = State(state_file)
+        bridge = MagicMock()
+        bridge.is_available.return_value = False
+        r = cmd(s, "u1", "/opencode", opencode_bridge=bridge)
+        assert "install" in r.lower()
+        # Route should NOT be changed
+        assert s.get("u1") == Route.HERMES
+
+    def test_whoami_includes_opencode_commands(self, state_file):
+        s = State(state_file)
+        r = cmd(s, "u1", "/whoami")
+        assert "/opencode" in r
+        assert "/three" in r
+
 
 # ── route_label ───────────────────────────────────────────────────────────
 
@@ -171,6 +202,12 @@ class TestRouteLabel:
 
     def test_both(self):
         assert route_label(Route.BOTH) == "Hermes + OpenClaw"
+
+    def test_opencode(self):
+        assert route_label(Route.OPENCODE) == "OpenCode"
+
+    def test_three(self):
+        assert route_label(Route.THREE) == "Hermes + OpenClaw + OpenCode"
 
 
 # ── MessageQueue ──────────────────────────────────────────────────────────
@@ -259,6 +296,30 @@ class TestRouteMessage:
         route_message("u1", {"id": 1}, Route.HERMES, None, None)
         # Should not raise.
 
+    def test_opencode_route(self):
+        import queue as stdlib_queue
+        hq, oq = MessageQueue(), MessageQueue()
+        ocode_q = stdlib_queue.Queue()
+        route_message("u1", {"id": 1}, Route.OPENCODE, hq, oq, ocode_q)
+        assert hq.size() == 0
+        assert oq.size() == 0
+        assert ocode_q.qsize() == 1
+
+    def test_three_route(self):
+        import queue as stdlib_queue
+        hq, oq = MessageQueue(), MessageQueue()
+        ocode_q = stdlib_queue.Queue()
+        route_message("u1", {"id": 1}, Route.THREE, hq, oq, ocode_q)
+        assert hq.size() == 1
+        assert oq.size() == 1
+        assert ocode_q.qsize() == 1
+
+    def test_opencode_no_queue_graceful(self):
+        # No opencode_q provided -- should just log warning, not raise
+        hq, oq = MessageQueue(), MessageQueue()
+        route_message("u1", {"id": 1}, Route.OPENCODE, hq, oq)
+        # Should not raise
+
 
 # ── proc_msg ──────────────────────────────────────────────────────────────
 
@@ -323,4 +384,196 @@ class TestProcMsg:
             proc_msg(make_ilink_msg(), s, "http://fake", "tok", hq, oq)
         assert mock_send.called
         args = mock_send.call_args[0]
-        assert "HermesClaw v2" in args[3]
+        assert "HermesClaw v3" in args[3]
+
+    def test_opencode_mode(self, state_file, make_ilink_msg):
+        """Messages in opencode mode enqueue to opencode_q, not hermes_q."""
+        import queue as stdlib_queue
+        s = State(state_file)
+        s.set("user123", Route.OPENCODE)
+        s.mark_status_shown("user123")
+        hq, oq = MessageQueue(), MessageQueue()
+        ocode_q = stdlib_queue.Queue()
+        with patch("hermesclaw.send_text_ilink"):
+            proc_msg(make_ilink_msg(), s, "http://fake", "tok", hq, oq, ocode_q)
+        assert hq.size() == 0
+        assert oq.size() == 0
+        assert ocode_q.qsize() == 1
+
+    def test_three_mode(self, state_file, make_ilink_msg):
+        """Messages in three mode go to all three queues."""
+        import queue as stdlib_queue
+        s = State(state_file)
+        s.set("user123", Route.THREE)
+        s.mark_status_shown("user123")
+        hq, oq = MessageQueue(), MessageQueue()
+        ocode_q = stdlib_queue.Queue()
+        with patch("hermesclaw.send_text_ilink"):
+            proc_msg(make_ilink_msg(), s, "http://fake", "tok", hq, oq, ocode_q)
+        assert hq.size() == 1
+        assert oq.size() == 1
+        assert ocode_q.qsize() == 1
+
+
+# ── ACPSession ────────────────────────────────────────────────────────────
+
+
+class TestACPSession:
+    """Test ACPSession with an in-process mock ACP server."""
+
+    @staticmethod
+    def _make_mock_server():
+        """Return (mock_proc, server_thread) with a simulated ACP server."""
+        import os, io
+
+        # Pipe for stdin: hermesclaw writes → server reads
+        srv_r_fd, cli_w_fd = os.pipe()
+        # Pipe for stdout: server writes → hermesclaw reads
+        cli_r_fd, srv_w_fd = os.pipe()
+
+        def _server():
+            r = os.fdopen(srv_r_fd, "r")
+            w = os.fdopen(srv_w_fd, "w")
+            try:
+                for raw in r:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        continue
+                    rid = msg.get("id")
+                    method = msg.get("method", "")
+                    if method == "initialize":
+                        resp = {"jsonrpc": "2.0", "id": rid,
+                                "result": {"protocolVersion": 1, "agentCapabilities": {}}}
+                        w.write(json.dumps(resp) + "\n")
+                        w.flush()
+                    elif method == "session/new":
+                        resp = {"jsonrpc": "2.0", "id": rid,
+                                "result": {"sessionId": "mock-sess-id", "configOptions": []}}
+                        w.write(json.dumps(resp) + "\n")
+                        w.flush()
+                    elif method == "session/prompt":
+                        sid = msg.get("params", {}).get("sessionId", "")
+                        notif = {
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": sid,
+                                "update": {
+                                    "sessionUpdate": "agent_message_chunk",
+                                    "messageId": "m1",
+                                    "content": {"type": "text", "text": "hello from mock opencode"},
+                                },
+                            },
+                        }
+                        w.write(json.dumps(notif) + "\n")
+                        w.flush()
+                        resp = {"jsonrpc": "2.0", "id": rid,
+                                "result": {"stopReason": "end_turn", "usage": {}}}
+                        w.write(json.dumps(resp) + "\n")
+                        w.flush()
+            except Exception:
+                pass
+            finally:
+                w.close()
+
+        t = threading.Thread(target=_server, daemon=True)
+        t.start()
+
+        class _MockProc:
+            stdin = os.fdopen(cli_w_fd, "wb")
+            stdout = os.fdopen(cli_r_fd, "rb")
+            stderr = io.BytesIO(b"")
+
+            def terminate(self):
+                try:
+                    self.stdin.close()
+                except Exception:
+                    pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        return _MockProc(), t
+
+    def test_initialize_and_session(self):
+        """ACPSession initializes and creates session via mock server."""
+        mock_proc, _ = self._make_mock_server()
+        with patch("subprocess.Popen", return_value=mock_proc):
+            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+        assert sess.session_id == "mock-sess-id"
+        assert sess.alive is True
+
+    def test_prompt_returns_text(self):
+        """prompt() collects agent_message_chunk text and returns it."""
+        mock_proc, _ = self._make_mock_server()
+        with patch("subprocess.Popen", return_value=mock_proc):
+            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+        result = sess.prompt("test question")
+        assert result == "hello from mock opencode"
+
+    def test_prompt_timeout_returns_error_string(self):
+        """When ACP server doesn't respond in time, return error string."""
+        import os, io
+        srv_r_fd, cli_w_fd = os.pipe()
+        cli_r_fd, srv_w_fd = os.pipe()
+
+        def _partial_server():
+            r = os.fdopen(srv_r_fd, "r")
+            w = os.fdopen(srv_w_fd, "w")
+            for raw in r:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+                rid = msg.get("id")
+                method = msg.get("method", "")
+                if method == "initialize":
+                    w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
+                                        "result": {"protocolVersion": 1, "agentCapabilities": {}}}) + "\n")
+                    w.flush()
+                elif method == "session/new":
+                    w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
+                                        "result": {"sessionId": "mock-sess", "configOptions": []}}) + "\n")
+                    w.flush()
+                # session/prompt: intentionally no response → timeout
+
+        threading.Thread(target=_partial_server, daemon=True).start()
+
+        class _TimeoutProc:
+            stdin = os.fdopen(cli_w_fd, "wb")
+            stdout = os.fdopen(cli_r_fd, "rb")
+            stderr = io.BytesIO(b"")
+            def terminate(self): pass
+            def wait(self, timeout=None): return 0
+            def kill(self): pass
+
+        with patch("subprocess.Popen", return_value=_TimeoutProc()):
+            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+        result = sess.prompt("anything", timeout=1)
+        assert "timeout" in result.lower()
+
+
+# ── OpenCodeBridge ────────────────────────────────────────────────────────
+
+
+class TestOpenCodeBridge:
+    def test_is_available_false_when_not_found(self):
+        bridge = OpenCodeBridge("/nonexistent/opencode")
+        assert bridge.is_available() is False
+
+    def test_cmd_opencode_not_installed_gives_hint(self, state_file):
+        s = State(state_file)
+        bridge = OpenCodeBridge("/nonexistent/opencode")
+        r = cmd(s, "u1", "/opencode", opencode_bridge=bridge)
+        assert "install" in r.lower()
+        assert s.get("u1") == Route.HERMES  # route unchanged

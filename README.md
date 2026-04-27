@@ -1,8 +1,8 @@
 # HermesClaw
 
-**Dual-open [Hermes Agent](https://github.com/NousResearch/hermes-agent) and [OpenClaw](https://github.com/openclaw/openclaw) on the same WeChat account. One command to install.**
+**Run [Hermes Agent](https://github.com/NousResearch/hermes-agent), [OpenClaw](https://github.com/openclaw/openclaw), and [OpenCode](https://github.com/sst/opencode) on the same WeChat account. One command to install.**
 
-**在同一个微信账号上同时双开 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 和 [OpenClaw](https://github.com/openclaw/openclaw)。一条命令安装。**
+**在同一个微信账号上同时多开 [Hermes Agent](https://github.com/NousResearch/hermes-agent)、[OpenClaw](https://github.com/openclaw/openclaw) 和 [OpenCode](https://github.com/sst/opencode)。一条命令安装。**
 
 <p align="center">
   <a href="https://x.com/AaronYonW"><img src="https://img.shields.io/badge/X-%40AaronYonW-000000.svg" alt="X / Twitter"></a>
@@ -14,17 +14,17 @@
 </p>
 
 <p align="center">
-  <em>One iLink account. Two AI brains. Switch with <code>/hermes</code>, <code>/openclaw</code>, <code>/both</code>.</em><br/>
-  <em>一个 iLink 账号，两个 AI 大脑。<code>/hermes</code>、<code>/openclaw</code>、<code>/both</code> 一句话切换。</em>
+  <em>One iLink account. Three AI brains. Switch with <code>/hermes</code>, <code>/openclaw</code>, <code>/opencode</code>, <code>/both</code>, <code>/three</code>.</em><br/>
+  <em>一个 iLink 账号，三个 AI 大脑。<code>/hermes</code>、<code>/openclaw</code>、<code>/opencode</code>、<code>/both</code>、<code>/three</code> 一句话切换。</em>
 </p>
 
 ---
 
 ## Why HermesClaw
 
-Both Hermes Agent and OpenClaw now support WeChat natively — **but you can't run both on the same account.** Each gateway exclusively locks the iLink connection. If you start both, one gets 403 errors and drops messages.
+Both Hermes Agent and OpenClaw now support WeChat natively — **but you can't run both on the same account.** Each gateway exclusively locks the iLink connection. If you start both, one gets 403 errors and drops messages. OpenCode adds a third AI brain via its ACP subprocess protocol.
 
-HermesClaw solves this by becoming the **sole iLink poller**, then running two local proxy servers — one for each gateway. Each gateway believes it's talking to the real iLink API.
+HermesClaw solves this by becoming the **sole iLink poller**, then running two local proxy servers (for Hermes and OpenClaw) plus a direct ACP bridge (for OpenCode). Each gateway believes it's talking to the real iLink API.
 
 现在 Hermes 和 OpenClaw 都原生支持微信了——**但你不能在同一个账号上双开。** 每个 Gateway 会独占 iLink 连接。HermesClaw 解决这个问题：它作为唯一的 iLink 轮询者，运行两个本地代理，让两个 Gateway 各连各的。
 
@@ -51,10 +51,12 @@ Special thanks to the [Hermes Agent](https://github.com/NousResearch/hermes-agen
 |---|---|---|
 | Hermes on WeChat | ✅ Works (native gateway) | ✅ Works |
 | OpenClaw on WeChat | ✅ Works (clawbot) | ✅ Works |
+| OpenCode on WeChat | ❌ No WeChat support | ✅ via ACP bridge |
 | Both on same account | ❌ Token conflict / 403 | ✅ `/both` mode |
+| All three on same account | ❌ Impossible | ✅ `/three` mode |
 | Voice messages | ✅ Each handles natively | ✅ Transcription forwarded |
 | Images / video / files | ✅ Each handles natively | ✅ Raw iLink msg forwarded |
-| Switching agents | — | `/hermes`, `/openclaw`, `/both` |
+| Switching agents | — | `/hermes`, `/openclaw`, `/opencode`, `/both`, `/three` |
 
 ---
 
@@ -68,26 +70,27 @@ Special thanks to the [Hermes Agent](https://github.com/NousResearch/hermes-agen
                       (sole poller / token owner)
                                │
                     ┌──────────▼────────────────────┐
-                    │     HermesClaw v2              │
+                    │     HermesClaw v3              │
                     │  routes by /hermes /openclaw   │
+                    │          /opencode /three      │
                     │  queues raw iLink messages     │
-                    ├──────────┬────────────────────┤
-                    │          │                    │
-              Proxy A (:19999)    Proxy B (:19998) │
-              for openclaw-weixin for hermes-gw    │
-                    │          │                    │
-                    ▼          ▼                    │
-              ┌──────────┐ ┌──────────┐            │
-              │ openclaw │ │ hermes   │            │
-              │ gateway  │ │ gateway  │            │
-              │ polls    │ │ polls    │            │
-              │ proxy A  │ │ proxy B  │            │
-              └────┬─────┘ └────┬─────┘            │
-                   │            │                  │
-              sendmessage  sendmessage             │
-                   └─────┬──────┘                  │
-                         │ (proxy forwards to iLink)│
-                         └─────────────────────────┘
+                    ├────────┬──────────┬────────────┤
+                    │        │          │
+              Proxy A      Proxy B    ACP Bridge
+              (:19999)     (:19998)   (subprocess)
+              openclaw     hermes     opencode acp
+                    │        │          │
+                    ▼        ▼          ▼
+              ┌──────────┐ ┌──────────┐ ┌──────────┐
+              │ openclaw │ │ hermes   │ │ opencode │
+              │ gateway  │ │ gateway  │ │ process  │
+              └────┬─────┘ └────┬─────┘ └────┬─────┘
+                   │            │             │
+              sendmessage  sendmessage   send_text_ilink
+                   └─────┬──────┘            │
+                         │ (proxy forwards)  │
+                         └──────────────────►┘
+                                to iLink
 ```
 
 HermesClaw is a thin Python proxy (~500 lines). It does **not** process media, call agent APIs, or touch agent memory. It just queues and forwards raw iLink protocol messages. Each gateway handles its own media decryption, markdown formatting, and AI interaction natively.
@@ -156,21 +159,33 @@ Restart gateways.  Verify /whoami works in WeChat.
 |---------|--------|
 | `/hermes` | Route to **Hermes** only |
 | `/openclaw` | Route to **OpenClaw** only |
+| `/opencode` | Route to **OpenCode** only (via ACP bridge) |
 | `/both` | Route to **Hermes + OpenClaw** (reply from both) |
+| `/three` | Route to **all three** (reply from all) |
 | `/whoami` | Show current route and status |
 | anything else | Forward to the active agent(s) |
 
-Default route is **Hermes**. In `/both` mode, replies are prefixed with `[Hermes Agent]` / `[OpenClaw]` for attribution.
+Default route is **Hermes**. In `/both` and `/three` modes, proxy replies are prefixed with `[Hermes Agent]` / `[OpenClaw]` / `[OpenCode]` for attribution.
+
+### OpenCode setup
+
+OpenCode connects via its native ACP subprocess protocol — no proxy port needed. Install it first:
+
+```bash
+npm install -g opencode-ai
+```
+
+Then set `OPENCODE_CMD` in `.env` (the installer auto-detects it). Use `/opencode` or `/three` once OpenCode is installed.
 
 ---
 
 ## Project layout
 
 ```text
-hermesclaw.py             # ~500 lines. Dual-proxy router.
+hermesclaw.py             # ~700 lines. Triple-proxy router + ACP bridge.
 install.sh                # Smart auto-detecting installer.
 fix_hermes_splitting.sh   # Patch Hermes weixin.py (optional, recommended).
-tests/                    # 59 pytest tests (core, proxy, recovery).
+tests/                    # 76 pytest tests (core, proxy, recovery).
 README.md
 LICENSE
 docs/                     # Screenshots and media.
@@ -229,6 +244,15 @@ rm -rf "$HOME/hermesclaw"
 ---
 
 ## Changelog
+
+### v0.3.0
+
+- **OpenCode ACP bridge** — New `OpenCodeBridge` + `ACPSession` classes implement JSON-RPC 2.0 over NDJSON for `opencode acp` subprocess. Per-user sessions with automatic reconnect.
+- **`/opencode` command** — Route messages to OpenCode only.
+- **`/three` command** — Route messages to all three agents simultaneously (Hermes + OpenClaw + OpenCode).
+- **"Not installed" detection** — If `opencode` binary is not found, `/opencode` and `/three` show a helpful install hint instead of crashing.
+- **Tagging in THREE mode** — Proxy tags Hermes/OpenClaw replies; OpenCode worker tags its own replies with `[OpenCode]`.
+- **76 tests** — 18 new tests covering new routes, ACPSession mock server, OpenCodeBridge, and THREE mode tagging.
 
 ### v0.2.1 (2026-04-12)
 

@@ -205,6 +205,27 @@ class TestSendMessage:
         text = sent_data["msg"]["item_list"][0]["text_item"]["text"]
         assert text.startswith("[TestTag]")
 
+    def test_three_mode_tags_text(self, proxy_env):
+        proxy_env["state"].set("u1", Route.THREE)
+        proxy_env["state"].mark_status_shown("u1")
+
+        payload = {
+            "msg": {
+                "to_user_id": "u1",
+                "item_list": [{"type": 1, "text_item": {"text": "hello"}}],
+            }
+        }
+        resp = requests.post(
+            f"{proxy_env['url']}/ilink/bot/sendmessage",
+            json=payload,
+            timeout=5,
+        )
+        assert resp.status_code == 200
+        req = _MockILinkHandler.last_request
+        sent_data = json.loads(req["body"])
+        text = sent_data["msg"]["item_list"][0]["text_item"]["text"]
+        assert text.startswith("[TestTag]")
+
     def test_single_mode_no_tag(self, proxy_env):
         proxy_env["state"].set("u1", Route.HERMES)
         proxy_env["state"].mark_status_shown("u1")

@@ -26,8 +26,8 @@ err()  { echo -e "${RED}ERR${NC}  $1"; }
 info() { echo -e "${CYAN}INFO${NC} $1"; }
 
 echo ""
-echo -e "${CYAN}HermesClaw v2 installer${NC}"
-echo -e "${CYAN}Dual-proxy gateway router for Hermes + OpenClaw on WeChat${NC}"
+echo -e "${CYAN}HermesClaw v3 installer${NC}"
+echo -e "${CYAN}Triple-proxy gateway router for Hermes + OpenClaw + OpenCode on WeChat${NC}"
 echo ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -230,6 +230,9 @@ HERMES_PROXY_PORT=${HERMES_PROXY_PORT}
 OPENCLAW_PROXY_PORT=${OPENCLAW_PROXY_PORT}
 HERMES_ENABLED=${hermes_on}
 OPENCLAW_ENABLED=${oc_on}
+OPENCODE_ENABLED=${OPENCODE_ENABLED}
+OPENCODE_CMD=${OPENCODE_CMD}
+OPENCODE_MODEL=${OPENCODE_MODEL}
 STATE_FILE=${PROJECT_DIR}/router_state.json
 LOG_FILE=${PROJECT_DIR}/hermesclaw.log
 LONG_POLL_TIMEOUT=35
@@ -258,7 +261,7 @@ install_systemd_service() {
     info "Installing ${SERVICE_NAME}.service."
     cat > /tmp/hermesclaw.service <<EOF
 [Unit]
-Description=HermesClaw v2 Dual-Proxy Router
+Description=HermesClaw v3 Triple-Proxy Router
 After=network.target
 
 [Service]
@@ -352,6 +355,20 @@ mapfile -t HERMES_WX_FILES < <(discover_hermes_weixin_accounts)
 
 HERMES_ENV_FILE=""
 HERMES_ENV_FILE="$(detect_hermes_env_file 2>/dev/null || true)"
+
+# ── OpenCode detection ────────────────────────────────────────────────────
+if command -v opencode &>/dev/null || [ -f "$HOME/.npm-global/bin/opencode" ]; then
+    OPENCODE_CMD=$(command -v opencode 2>/dev/null || echo "$HOME/.npm-global/bin/opencode")
+    info "OpenCode found: $OPENCODE_CMD"
+    OPENCODE_ENABLED=true
+else
+    warn "OpenCode not found; /opencode and /three will not work until installed."
+    warn "To install: npm install -g opencode-ai"
+    OPENCODE_ENABLED=false
+    OPENCODE_CMD=""
+fi
+
+OPENCODE_MODEL="${OPENCODE_MODEL:-opencode/minimax-m2.5-free}"
 
 # 2) Gate: at least one gateway must be configured.
 if ! ${HAS_OC_GW} && ! ${HAS_HERMES_GW}; then

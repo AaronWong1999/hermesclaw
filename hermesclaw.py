@@ -1,4 +1,4 @@
-"""HermesClaw v2: dual-gateway proxy router for WeChat.
+"""HermesClaw v3: triple-gateway proxy router for WeChat.
 
 Takes over one iLink token, polls for messages, and distributes them
 to two independent proxy servers -- one for OpenClaw's clawbot and one
@@ -9,8 +9,11 @@ directly to the iLink API.
 import json
 import logging
 import os
+import queue
 import secrets
 import signal
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -41,7 +44,9 @@ log = logging.getLogger("hermesclaw")
 class Route(str, Enum):
     HERMES = "hermes"
     OPENCLAW = "openclaw"
+    OPENCODE = "opencode"
     BOTH = "both"
+    THREE = "three"
 
 
 class State:
@@ -121,6 +126,167 @@ def extract_text(items):
 
 
 # ---------------------------------------------------------------------------
+# OpenCode ACP bridge
+# ---------------------------------------------------------------------------
+
+
+class ACPSession:
+    """A single ACP session backed by an opencode acp subprocess."""
+
+    def __init__(self, opencode_cmd, cwd, model):
+        self.model = model
+        self.session_id = None
+        self.alive = False
+        self._req_id = 0
+        self._lock = threading.Lock()
+        self._pending = {}   # req_id -> threading.Event
+        self._results = {}   # req_id -> msg
+        self._text_buf = []  # accumulates text chunks for current prompt
+
+        self._proc = subprocess.Popen(
+            [opencode_cmd, "acp"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+
+        # ACP handshake
+        r = self._send_wait("initialize", {
+            "protocolVersion": 1,
+            "clientInfo": {
+                "name": "hermesclaw",
+                "title": "HermesClaw",
+                "version": "0.3.0",
+            },
+            "clientCapabilities": {},
+        }, timeout=15)
+        if not r or "error" in r:
+            raise RuntimeError(f"ACP initialize failed: {r}")
+
+        r = self._send_wait("session/new", {
+            "cwd": cwd,
+            "mcpServers": [],
+        }, timeout=15)
+        if not r or "error" in r or "result" not in r:
+            raise RuntimeError(f"ACP session/new failed: {r}")
+        self.session_id = r["result"]["sessionId"]
+        self.alive = True
+
+    def _read_loop(self):
+        while True:
+            try:
+                line = self._proc.stdout.readline()
+                if not line:
+                    break
+                line = line.decode().strip()
+                if not line:
+                    continue
+                msg = json.loads(line)
+            except Exception:
+                break
+
+            if "id" in msg:
+                with self._lock:
+                    self._results[msg["id"]] = msg
+                    ev = self._pending.pop(msg["id"], None)
+                if ev:
+                    ev.set()
+            elif msg.get("method") == "session/update":
+                upd = msg.get("params", {}).get("update", {})
+                if upd.get("sessionUpdate") == "agent_message_chunk":
+                    content = upd.get("content", {})
+                    if content.get("type") == "text":
+                        with self._lock:
+                            self._text_buf.append(content["text"])
+
+    def _send_wait(self, method, params, timeout=10):
+        with self._lock:
+            self._req_id += 1
+            req_id = self._req_id
+            ev = threading.Event()
+            self._pending[req_id] = ev
+        raw = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
+        self._proc.stdin.write((raw + "\n").encode())
+        self._proc.stdin.flush()
+        if ev.wait(timeout):
+            with self._lock:
+                return self._results.pop(req_id, None)
+        log.warning("ACP timeout waiting for %s (id=%d)", method, req_id)
+        return None
+
+    def prompt(self, text, timeout=120):
+        """Send a text prompt; return accumulated response text."""
+        with self._lock:
+            self._text_buf.clear()
+        r = self._send_wait("session/prompt", {
+            "sessionId": self.session_id,
+            "prompt": [{"type": "text", "text": text}],
+            "model": self.model,
+        }, timeout=timeout)
+        if r is None:
+            return "[OpenCode: timeout]"
+        if "error" in r:
+            return f"[OpenCode error: {r['error'].get('message', '?')}]"
+        with self._lock:
+            return "".join(self._text_buf).strip()
+
+    def close(self):
+        self.alive = False
+        try:
+            self._proc.terminate()
+            self._proc.wait(timeout=5)
+        except Exception:
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+
+
+class OpenCodeBridge:
+    """Manages per-user ACPSession instances for OpenCode integration."""
+
+    def __init__(self, opencode_cmd, model="opencode/minimax-m2.5-free", cwd=None):
+        self.opencode_cmd = opencode_cmd
+        self.model = model
+        self.cwd = cwd or str(Path.home())
+        self._sessions = {}   # uid -> ACPSession
+        self._lock = threading.Lock()
+
+    def is_available(self):
+        """Return True if the opencode binary is found."""
+        return bool(shutil.which(self.opencode_cmd) or os.path.isfile(self.opencode_cmd))
+
+    def send(self, uid, text, timeout=120):
+        """Route text to this user's ACP session; return response."""
+        session = self._get_or_create(uid)
+        return session.prompt(text, timeout)
+
+    def _get_or_create(self, uid):
+        with self._lock:
+            s = self._sessions.get(uid)
+            if s is None or not s.alive:
+                log.info("Creating OpenCode session for %s", uid[:16])
+                s = ACPSession(self.opencode_cmd, self.cwd, self.model)
+                self._sessions[uid] = s
+        return s
+
+    def close_session(self, uid):
+        with self._lock:
+            s = self._sessions.pop(uid, None)
+        if s:
+            s.close()
+
+    def close_all(self):
+        with self._lock:
+            sessions = list(self._sessions.values())
+            self._sessions.clear()
+        for s in sessions:
+            s.close()
+
+
+# ---------------------------------------------------------------------------
 # Router commands
 # ---------------------------------------------------------------------------
 
@@ -130,10 +296,14 @@ def route_label(r):
         return "Hermes"
     if r == Route.OPENCLAW:
         return "OpenClaw"
-    return "Hermes + OpenClaw"
+    if r == Route.OPENCODE:
+        return "OpenCode"
+    if r == Route.BOTH:
+        return "Hermes + OpenClaw"
+    return "Hermes + OpenClaw + OpenCode"
 
 
-def cmd(state, uid, text):
+def cmd(state, uid, text, opencode_bridge=None):
     """Process a slash command.  Returns reply text or None for passthrough."""
     c = text.strip().lower()
     if c == "/hermes":
@@ -142,17 +312,32 @@ def cmd(state, uid, text):
     if c == "/openclaw":
         state.set(uid, Route.OPENCLAW)
         return "Switched to **OpenClaw**."
+    if c == "/opencode":
+        if opencode_bridge is not None and not opencode_bridge.is_available():
+            return (
+                "❌ OpenCode is not installed.\n"
+                "Please install it with:\n"
+                "  npm install -g opencode-ai\n"
+                "Then restart HermesClaw and try /opencode again."
+            )
+        state.set(uid, Route.OPENCODE)
+        return "Switched to **OpenCode** 🤖"
     if c == "/both":
         state.set(uid, Route.BOTH)
         return "Switched to **Hermes + OpenClaw**."
+    if c == "/three":
+        state.set(uid, Route.THREE)
+        return "Switched to **Hermes + OpenClaw + OpenCode** 🔱"
     if c == "/whoami":
         route = state.get(uid)
         return (
-            f"**HermesClaw** by X @AaronYonW\n"
+            f"**HermesClaw v3** by X @AaronYonW\n"
             f"**Current route**: **{route_label(route)}**\n"
             f"**/hermes** → Hermes only\n"
             f"**/openclaw** → OpenClaw only\n"
-            f"**/both** → both reply\n"
+            f"**/opencode** → OpenCode only\n"
+            f"**/both** → Hermes + OpenClaw\n"
+            f"**/three** → all three\n"
             f"**/whoami** → this status"
         )
     return None
@@ -337,7 +522,7 @@ def make_proxy_handler(queue, ilink_base_url, ilink_token, state, tag):
                     route = state.get(to_user) if to_user else Route.HERMES
                 except Exception:
                     route = Route.HERMES
-                if route == Route.BOTH:
+                if route in (Route.BOTH, Route.THREE):
                     for item in msg_obj.get("item_list", []):
                         if item.get("type") == T:
                             ti = item.get("text_item", {})
@@ -415,21 +600,57 @@ def make_proxy_handler(queue, ilink_base_url, ilink_token, state, tag):
 # ---------------------------------------------------------------------------
 
 
-def route_message(uid, msg, route, hermes_q, openclaw_q):
+def route_message(uid, msg, route, hermes_q, openclaw_q, opencode_q=None):
     """Enqueue *msg* to the correct proxy queue(s) based on *route*."""
-    if route in (Route.HERMES, Route.BOTH):
+    if route in (Route.HERMES, Route.BOTH, Route.THREE):
         if hermes_q:
             hermes_q.enqueue(msg)
         else:
             log.warning("Hermes queue not available for %s", uid[:16])
-    if route in (Route.OPENCLAW, Route.BOTH):
+    if route in (Route.OPENCLAW, Route.BOTH, Route.THREE):
         if openclaw_q:
             openclaw_q.enqueue(msg)
         else:
             log.warning("OpenClaw queue not available for %s", uid[:16])
+    if route in (Route.OPENCODE, Route.THREE):
+        if opencode_q is not None:
+            opencode_q.put((uid, msg))
+        else:
+            log.warning("OpenCode queue not available for %s", uid[:16])
 
 
-def proc_msg(msg, state, base_url, token, hermes_q, openclaw_q):
+def opencode_worker(bridge, q, base_url, token, state):
+    """Dedicated thread: dequeue messages and send them to OpenCode."""
+    while True:
+        try:
+            uid, msg = q.get()
+            txt = extract_text(msg)
+            if not txt:
+                continue
+            route = state.get(uid)
+            try:
+                reply = bridge.send(uid, txt)
+                if reply:
+                    tag = "[OpenCode] " if route == Route.THREE else ""
+                    send_text_ilink(
+                        base_url, token, uid,
+                        tag + reply,
+                        msg.get("context_token"),
+                    )
+            except Exception as e:
+                log.error("OpenCode error for %s: %s", uid[:16], e)
+                try:
+                    send_text_ilink(base_url, token, uid,
+                                    f"[OpenCode error: {e}]",
+                                    msg.get("context_token"))
+                except Exception:
+                    pass
+        except Exception as e:
+            log.error("opencode_worker: %s", e, exc_info=True)
+
+
+def proc_msg(msg, state, base_url, token, hermes_q, openclaw_q,
+             opencode_q=None, opencode_bridge=None):
     """Process one inbound iLink message."""
     uid = msg.get("from_user_id", "")
     ctx = msg.get("context_token", "")
@@ -445,19 +666,19 @@ def proc_msg(msg, state, base_url, token, hermes_q, openclaw_q):
 
     # Show status on first contact.
     if state.should_show_status(uid) and not txt.startswith("/"):
-        reply = cmd(state, uid, "/whoami")
+        reply = cmd(state, uid, "/whoami", opencode_bridge)
         send_text_ilink(base_url, token, uid, reply, ctx)
         state.mark_status_shown(uid)
 
     # Slash commands are text-only; never forwarded to gateways.
     if txt.startswith("/"):
-        r = cmd(state, uid, txt)
+        r = cmd(state, uid, txt, opencode_bridge)
         if r:
             send_text_ilink(base_url, token, uid, r, ctx)
             return
 
     route = state.get(uid)
-    route_message(uid, msg, route, hermes_q, openclaw_q)
+    route_message(uid, msg, route, hermes_q, openclaw_q, opencode_q)
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +689,8 @@ MAX_FAILS = 3
 BACKOFF = 30
 
 
-def poll_loop(base_url, token, state, hermes_q, openclaw_q, poll_sec=None):
+def poll_loop(base_url, token, state, hermes_q, openclaw_q,
+              opencode_q=None, opencode_bridge=None, poll_sec=None):
     if poll_sec is None:
         poll_sec = DEFAULT_POLL_SEC
     buf = ""
@@ -491,7 +713,8 @@ def poll_loop(base_url, token, state, hermes_q, openclaw_q, poll_sec=None):
                 buf = resp["get_updates_buf"]
             for m in resp.get("msgs", []):
                 try:
-                    proc_msg(m, state, base_url, token, hermes_q, openclaw_q)
+                    proc_msg(m, state, base_url, token, hermes_q, openclaw_q,
+                             opencode_q, opencode_bridge)
                 except Exception as e:
                     log.error("proc: %s", e, exc_info=True)
         except Exception as e:
@@ -523,6 +746,10 @@ def main():
     poll_sec = int(os.getenv("LONG_POLL_TIMEOUT", "35"))
     hermes_on = os.getenv("HERMES_ENABLED", "true").lower() in ("true", "1", "yes")
     oc_on = os.getenv("OPENCLAW_ENABLED", "true").lower() in ("true", "1", "yes")
+    opencode_on = os.getenv("OPENCODE_ENABLED", "true").lower() in ("true", "1", "yes")
+    opencode_model = os.getenv("OPENCODE_MODEL", "opencode/minimax-m2.5-free")
+    opencode_cmd = os.getenv("OPENCODE_CMD", "/home/ubuntu/.npm-global/bin/opencode")
+    opencode_cwd = os.getenv("OPENCODE_CWD", str(Path.home()))
 
     logging.basicConfig(
         level=logging.INFO,
@@ -540,12 +767,15 @@ def main():
     state = State(state_file)
     hermes_q = MessageQueue() if hermes_on else None
     oc_q = MessageQueue() if oc_on else None
+    opencode_q = None
+    opencode_bridge = None
 
     log.info("=" * 60)
-    log.info("HermesClaw v2 -- dual gateway proxy")
+    log.info("HermesClaw v3 -- triple gateway proxy")
     log.info("iLink: %s", base_url)
     log.info("Hermes proxy: :%d (enabled=%s)", hermes_port, hermes_on)
     log.info("OpenClaw proxy: :%d (enabled=%s)", oc_port, oc_on)
+    log.info("OpenCode bridge: enabled=%s", opencode_on)
     log.info("Default route: %s", Route.HERMES.value)
     log.info("=" * 60)
 
@@ -569,9 +799,25 @@ def main():
         servers.append(oc_srv)
         log.info("OpenClaw proxy started on :%d", oc_port)
 
+    if opencode_on:
+        opencode_bridge = OpenCodeBridge(opencode_cmd, opencode_model, opencode_cwd)
+        if opencode_bridge.is_available():
+            opencode_q = queue.Queue()
+            threading.Thread(
+                target=opencode_worker,
+                args=(opencode_bridge, opencode_q, base_url, token, state),
+                daemon=True,
+            ).start()
+            log.info("OpenCode bridge ready (model=%s)", opencode_model)
+        else:
+            log.warning(
+                "OpenCode binary not found at %s; /opencode and /three will "
+                "prompt users to install it.", opencode_cmd,
+            )
+
     poll_thread = threading.Thread(
         target=poll_loop,
-        args=(base_url, token, state, hermes_q, oc_q, poll_sec),
+        args=(base_url, token, state, hermes_q, oc_q, opencode_q, opencode_bridge, poll_sec),
         daemon=True,
     )
     poll_thread.start()
@@ -584,6 +830,8 @@ def main():
         time.sleep(1)
 
     log.info("Shutting down...")
+    if opencode_bridge:
+        opencode_bridge.close_all()
     for s in servers:
         s.shutdown()
     log.info("Stopped")
