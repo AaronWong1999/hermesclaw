@@ -1,9 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-# ── HermesClaw v2 installer ──────────────────────────────────────────────
-# Detects Hermes Agent gateway + OpenClaw gateway, configures both to
-# connect through HermesClaw's dual proxy, and installs the systemd service.
+# ── HermesClaw v3 installer ──────────────────────────────────────────────
+# Detects Hermes Agent gateway + OpenClaw gateway + OpenCode CLI, configures
+# all three to connect through HermesClaw's triple proxy/bridge, and installs
+# the systemd service.
 
 REPO_URL="${HERMESCLAW_REPO_URL:-https://github.com/AaronWong1999/hermesclaw.git}"
 PROJECT_DIR="${HERMESCLAW_DIR:-${HOME}/hermesclaw}"
@@ -13,6 +14,8 @@ ENV_FILE="${PROJECT_DIR}/.env"
 APP_FILE="${PROJECT_DIR}/hermesclaw.py"
 HERMES_PROXY_PORT="${HERMES_PROXY_PORT:-19998}"
 OPENCLAW_PROXY_PORT="${OPENCLAW_PROXY_PORT:-19999}"
+# Set HERMESCLAW_YES=1 (or pass -y) to skip interactive confirmation prompts.
+AUTO_YES="${HERMESCLAW_YES:-0}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -44,10 +47,20 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 need_cmd python3
 need_cmd git
 
+# Parse -y / --yes flag
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) AUTO_YES=1 ;;
+    esac
+done
+
 # ── Bootstrap repo ────────────────────────────────────────────────────────
 
 bootstrap_repo_if_needed() {
     if [ -f "${APP_FILE}" ] && [ -f "${PROJECT_DIR}/README.md" ]; then
+        info "Repo already present — pulling latest changes."
+        git -C "${PROJECT_DIR}" pull --ff-only 2>&1 | sed 's/^/  /' || \
+            warn "git pull failed (local changes?). Continuing with existing code."
         return 0
     fi
     info "Cloning HermesClaw into ${PROJECT_DIR}."
@@ -301,17 +314,27 @@ print_ai_prompt() {
     cat <<'EOF'
 
 AI-assisted install prompt (paste this to an AI agent):
-  Read README.md and install.sh in the hermesclaw repository.
-  Detect whether Hermes Agent, OpenClaw, their WeChat gateways,
-  python3, pip3, and systemd are present.  At least one gateway
-  must be configured.  Extract the iLink token from the first
-  available gateway account file.  Patch openclaw-weixin baseUrl
-  to http://127.0.0.1:19999 and Hermes WEIXIN_BASE_URL to
-  http://127.0.0.1:19998.  Install dependencies and systemd
-  service.  If Hermes Agent WeChat gateway is detected, accept
-  the installer's offer to patch weixin.py to disable newline-based
-  message splitting (recommended) — or run fix_hermes_splitting.sh
-  manually after install.  Restart gateways.  Verify /whoami works.
+  Run: curl -fsSL https://raw.githubusercontent.com/AaronWong1999/hermesclaw/main/install.sh | bash
+
+  Then read README.md and install.sh from the installed HermesClaw directory.
+  Detect whether Hermes Agent, OpenClaw, their WeChat gateways, python3,
+  pip3, and systemd are present.  At least one gateway must be configured.
+  Extract the iLink token from the first available gateway account file.
+  Patch openclaw-weixin baseUrl to http://127.0.0.1:19999 and Hermes
+  WEIXIN_BASE_URL to http://127.0.0.1:19998.  Install dependencies and
+  systemd service.
+
+  Also detect OpenCode CLI: run `command -v opencode` or check
+  ~/.npm-global/bin/opencode.  If not found, suggest installing with:
+    npm install -g opencode-ai
+  Set OPENCODE_CMD in .env to the detected path (or empty if not found).
+  OPENCODE_MODEL defaults to opencode/minimax-m2.5-free (free, no API key).
+
+  If Hermes Agent WeChat gateway is detected, accept the installer's offer
+  to patch weixin.py to disable newline-based message splitting
+  (recommended) — or run fix_hermes_splitting.sh manually after install.
+
+  Restart gateways.  Verify /whoami works in WeChat.
 
 AI-assisted uninstall prompt:
   Stop and disable the hermesclaw systemd service.  Restore
@@ -404,6 +427,7 @@ echo "  Hermes Agent:    ${HAS_HERMES}"
 echo "  Hermes WX GW:    ${HAS_HERMES_GW}  (${#HERMES_WX_FILES[@]} account files)"
 echo "  OpenClaw:        ${HAS_OPENCLAW}"
 echo "  OpenClaw WX GW:  ${HAS_OC_GW}  (${#OC_ACCOUNT_FILES[@]} account files)"
+echo "  OpenCode:        ${OPENCODE_ENABLED}  (${OPENCODE_CMD:-not found})"
 echo "  iLink token:     ${ILINK_TOKEN_VALUE:0:16}..."
 echo "  Hermes proxy:    :${HERMES_PROXY_PORT}"
 echo "  OpenClaw proxy:  :${OPENCLAW_PROXY_PORT}"
@@ -419,10 +443,14 @@ if ! ${HAS_HERMES_GW}; then
     warn "Hermes gateway not found. Hermes routing will be disabled."
 fi
 
-read -r -p "Continue with installation? [Y/n] " REPLY
-if [[ "${REPLY:-Y}" =~ ^[Nn]$ ]]; then
-    echo "Aborted."
-    exit 0
+if [[ "$AUTO_YES" == "1" ]]; then
+    info "Auto-yes mode — skipping confirmation."
+else
+    read -r -p "Continue with installation? [Y/n] " REPLY
+    if [[ "${REPLY:-Y}" =~ ^[Nn]$ ]]; then
+        echo "Aborted."
+        exit 0
+    fi
 fi
 
 # 5) Install deps.
@@ -460,7 +488,12 @@ if ${HAS_HERMES_GW}; then
     echo ""
     echo "We can patch weixin.py to keep messages as single units (split by length only)."
     echo -e "${YELLOW}推荐 (Recommended): Apply this fix.${NC}"
-    read -r -p "Apply Hermes message splitting fix? [Y/n] " APPLY_SPLIT_FIX
+    if [[ "$AUTO_YES" == "1" ]]; then
+        APPLY_SPLIT_FIX="Y"
+        info "Auto-yes: applying Hermes message splitting fix."
+    else
+        read -r -p "Apply Hermes message splitting fix? [Y/n] " APPLY_SPLIT_FIX
+    fi
     if [[ "${APPLY_SPLIT_FIX:-Y}" =~ ^[Yy]$ ]] || [[ "${APPLY_SPLIT_FIX:-}" == "" ]]; then
         info "Applying Hermes Agent message splitting fix..."
         FIX_SCRIPT="${PROJECT_DIR}/fix_hermes_splitting.sh"

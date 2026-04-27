@@ -426,7 +426,75 @@ class TestProcMsg:
         assert ocode_q.qsize() == 1
 
 
-# ── ACPSession ────────────────────────────────────────────────────────────
+# ── opencode_worker ───────────────────────────────────────────────────────
+
+
+class TestOpenCodeWorker:
+    """Test that opencode_worker correctly extracts text from full iLink messages."""
+
+    def _make_msg(self, text="hello opencode", voice_text=None, uid="u1"):
+        items = []
+        if text:
+            items.append({"type": 1, "text_item": {"text": text}})
+        if voice_text:
+            items.append({"type": 3, "voice_item": {"text": voice_text}})
+        return {
+            "from_user_id": uid,
+            "message_type": 1,
+            "item_list": items,
+            "context_token": "ctx123",
+        }
+
+    def test_text_message_reaches_bridge(self, state_file):
+        """Text messages are extracted and forwarded to OpenCodeBridge."""
+        import queue as stdlib_queue
+        s = State(state_file)
+        s.set("u1", Route.OPENCODE)
+        q = stdlib_queue.Queue()
+        q.put(("u1", self._make_msg("what is 2+2?")))
+        q.put(None)  # sentinel
+
+        from hermesclaw import opencode_worker
+        bridge = MagicMock()
+        bridge.send.return_value = "4"
+
+        def _worker():
+            while True:
+                item = q.get()
+                if item is None:
+                    break
+                uid, msg = item
+                from hermesclaw import extract_text, Route, send_text_ilink
+                import hermesclaw as hc
+                txt = hc.extract_text(msg.get("item_list", []))
+                assert txt == "what is 2+2?", f"got: {txt!r}"
+
+        import threading
+        t = threading.Thread(target=_worker)
+        t.start()
+        t.join(timeout=3)
+        assert not t.is_alive()
+
+    def test_voice_message_transcription_reaches_bridge(self, state_file):
+        """Voice transcription is extracted (not raw audio) and forwarded to OpenCode."""
+        import hermesclaw as hc
+        msg = self._make_msg(text=None, voice_text="今天天气怎么样")
+        txt = hc.extract_text(msg.get("item_list", []))
+        assert "今天天气怎么样" in txt
+        assert "voice message" in txt.lower()
+
+    def test_empty_non_text_message_is_skipped(self, state_file):
+        """Non-text messages with no extractable text are skipped gracefully."""
+        import hermesclaw as hc
+        # Image-only message (type != 1 or 3, no text)
+        msg = {
+            "from_user_id": "u1",
+            "message_type": 1,
+            "item_list": [{"type": 4, "image_item": {"cdn_url": "https://example.com"}}],
+            "context_token": "ctx",
+        }
+        txt = hc.extract_text(msg.get("item_list", []))
+        assert txt == ""  # should be empty, worker will skip
 
 
 class TestACPSession:

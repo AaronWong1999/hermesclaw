@@ -675,7 +675,7 @@ def opencode_worker(bridge, q, base_url, token, state):
     while True:
         try:
             uid, msg = q.get()
-            txt = extract_text(msg)
+            txt = extract_text(msg.get("item_list", []))
             if not txt:
                 continue
             route = state.get(uid)
