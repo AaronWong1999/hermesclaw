@@ -281,6 +281,62 @@ install_python_deps() {
     ok "Python dependencies ready."
 }
 
+# ── Legacy service conflict detection ─────────────────────────────────────
+
+# detect_and_disable_legacy_services checks for old WeChat bridge services
+# that are directly superseded by HermesClaw and should not run alongside it.
+# Only hermes-weixin-bridge.service (the old bridge.py) is targeted;
+# hermes.service and openclaw.service are gateways and must keep running.
+detect_and_disable_legacy_services() {
+    [ "$(uname)" = "Linux" ] || return 0
+    command -v systemctl >/dev/null 2>&1 || return 0
+
+    local legacy_services=("hermes-weixin-bridge.service")
+
+    for svc in "${legacy_services[@]}"; do
+        local is_enabled is_active
+        is_enabled="$(systemctl is-enabled "$svc" 2>/dev/null || true)"
+        is_active="$(systemctl is-active  "$svc" 2>/dev/null || true)"
+
+        # Treat enabled and enabled-runtime as auto-start states
+        local will_autostart=false
+        [[ "$is_enabled" == "enabled" || "$is_enabled" == "enabled-runtime" ]] && will_autostart=true
+
+        if $will_autostart || [[ "$is_active" == "active" ]]; then
+            warn "Legacy service detected: ${svc} (enabled=${is_enabled}, active=${is_active})"
+            warn "  This old WeChat bridge conflicts with HermesClaw — it may cause duplicate"
+            warn "  message handling right now, and will restart on every reboot."
+
+            local do_disable=false
+            if [[ "$AUTO_YES" == "1" ]]; then
+                info "Auto-yes: disabling and stopping ${svc}."
+                do_disable=true
+            else
+                echo ""
+                read -r -p "Disable and stop ${svc} now? [Y/n] " REPLY_LEGACY
+                [[ "${REPLY_LEGACY:-Y}" =~ ^[Nn]$ ]] || do_disable=true
+            fi
+
+            if $do_disable; then
+                sudo systemctl disable --now "$svc" >/dev/null 2>&1 || true
+                # Verify the disable actually took effect
+                local post_enabled post_active
+                post_enabled="$(systemctl is-enabled "$svc" 2>/dev/null || true)"
+                post_active="$(systemctl is-active  "$svc" 2>/dev/null || true)"
+                if [[ "$post_active" == "active" || "$post_enabled" == "enabled" || "$post_enabled" == "enabled-runtime" ]]; then
+                    warn "Could not fully disable ${svc} (enabled=${post_enabled}, active=${post_active})."
+                    warn "  Run manually: sudo systemctl disable --now ${svc}"
+                else
+                    ok "Disabled ${svc}."
+                fi
+            else
+                warn "Skipped. ${svc} may still conflict with HermesClaw now and on next reboot."
+            fi
+        fi
+    done
+    return 0
+}
+
 # ── systemd ───────────────────────────────────────────────────────────────
 
 install_systemd_service() {
@@ -489,6 +545,9 @@ else
         exit 0
     fi
 fi
+
+# 4.5) Disable legacy services that conflict with HermesClaw.
+detect_and_disable_legacy_services
 
 # 5) Install deps.
 install_python_deps
