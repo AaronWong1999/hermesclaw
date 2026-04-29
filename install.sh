@@ -71,6 +71,20 @@ for arg in "$@"; do
     esac
 done
 
+# Open /dev/tty for interactive prompts when stdin is piped (e.g. curl | bash).
+# read(1) returns non-zero on EOF; protecting against set -e exiting early.
+# Falls back to auto-yes if /dev/tty is unavailable (CI / Docker without tty).
+_PROMPT_FD=0
+if [[ ! -t 0 ]]; then
+    if [[ -r /dev/tty ]]; then
+        exec 3</dev/tty
+        _PROMPT_FD=3
+    elif [[ "$AUTO_YES" == "0" ]]; then
+        AUTO_YES=1
+        info "Non-interactive stdin with no /dev/tty — using auto-yes defaults."
+    fi
+fi
+
 # ── Bootstrap repo ────────────────────────────────────────────────────────
 
 bootstrap_repo_if_needed() {
@@ -134,9 +148,13 @@ discover_oc_account_files() {
 scan_oc_accounts() {
     OC_ACCOUNT_DIRS=()
     OC_ACCOUNT_FILES=()
-    mapfile -t OC_ACCOUNT_DIRS < <(discover_oc_accounts_dirs)
+    while IFS= read -r _line; do
+        OC_ACCOUNT_DIRS+=("$_line")
+    done < <(discover_oc_accounts_dirs)
     if [ "${#OC_ACCOUNT_DIRS[@]}" -gt 0 ]; then
-        mapfile -t OC_ACCOUNT_FILES < <(discover_oc_account_files "${OC_ACCOUNT_DIRS[@]}")
+        while IFS= read -r _line; do
+            OC_ACCOUNT_FILES+=("$_line")
+        done < <(discover_oc_account_files "${OC_ACCOUNT_DIRS[@]}")
     fi
 }
 
@@ -313,7 +331,7 @@ detect_and_disable_legacy_services() {
                 do_disable=true
             else
                 echo ""
-                read -r -p "Disable and stop ${svc} now? [Y/n] " REPLY_LEGACY
+                read -r -u "$_PROMPT_FD" -p "Disable and stop ${svc} now? [Y/n] " REPLY_LEGACY || REPLY_LEGACY=""
                 [[ "${REPLY_LEGACY:-Y}" =~ ^[Nn]$ ]] || do_disable=true
             fi
 
@@ -466,7 +484,9 @@ fi
 
 # Hermes WeChat gateway.
 HERMES_WX_FILES=()
-mapfile -t HERMES_WX_FILES < <(discover_hermes_weixin_accounts)
+while IFS= read -r _line; do
+    HERMES_WX_FILES+=("$_line")
+done < <(discover_hermes_weixin_accounts)
 [ "${#HERMES_WX_FILES[@]}" -gt 0 ] && HAS_HERMES_GW=true
 
 HERMES_ENV_FILE=""
@@ -539,7 +559,7 @@ fi
 if [[ "$AUTO_YES" == "1" ]]; then
     info "Auto-yes mode — skipping confirmation."
 else
-    read -r -p "Continue with installation? [Y/n] " REPLY
+    read -r -u "$_PROMPT_FD" -p "Continue with installation? [Y/n] " REPLY || REPLY=""
     if [[ "${REPLY:-Y}" =~ ^[Nn]$ ]]; then
         echo "Aborted."
         exit 0
@@ -588,7 +608,7 @@ if ${HAS_HERMES_GW}; then
         APPLY_SPLIT_FIX="Y"
         info "Auto-yes: applying Hermes message splitting fix."
     else
-        read -r -p "Apply Hermes message splitting fix? [Y/n] " APPLY_SPLIT_FIX
+        read -r -u "$_PROMPT_FD" -p "Apply Hermes message splitting fix? [Y/n] " APPLY_SPLIT_FIX || APPLY_SPLIT_FIX=""
     fi
     if [[ "${APPLY_SPLIT_FIX:-Y}" =~ ^[Yy]$ ]] || [[ "${APPLY_SPLIT_FIX:-}" == "" ]]; then
         info "Applying Hermes Agent message splitting fix..."
