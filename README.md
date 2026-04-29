@@ -264,6 +264,13 @@ rm -rf "$HOME/hermesclaw"
 
 ## Changelog
 
+### v0.3.6
+
+- **Fix: macOS install failure — `mapfile: command not found`** — macOS ships with bash 3.2 which lacks the `mapfile` builtin (added in bash 4). All 3 occurrences replaced with portable `while IFS= read -r` loops, making the installer work on macOS out of the box.
+- **Fix: `curl | bash` silent abort** — With `set -euo pipefail`, bare `read` calls returned non-zero on EOF when stdin was a pipe, causing the installer to exit before any `${REPLY:-Y}` default was evaluated. The installer now detects a non-tty stdin and redirects interactive prompts to `/dev/tty` so users can still answer them; if `/dev/tty` is also unavailable (CI / Docker) it falls back to auto-yes. All three prompt calls also have `|| VAR=""` guards as defence-in-depth.
+- **5 new regression tests** — `tests/test_install_sh.py` covers mapfile absence, bash syntax, read guards, tty detection, and non-interactive stdin.
+- Thanks to [@ShxxxNewBee](https://github.com/ShxxxNewBee), [@siasbaily](https://github.com/siasbaily), and [@csloz](https://github.com/csloz) for reporting and diagnosing these issues 🙏
+
 ### v0.3.0
 
 - **OpenCode ACP bridge** — New `OpenCodeBridge` + `ACPSession` classes implement JSON-RPC 2.0 over NDJSON for `opencode acp` subprocess. Per-user sessions with automatic reconnect.
