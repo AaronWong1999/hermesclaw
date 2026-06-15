@@ -264,6 +264,10 @@ rm -rf "$HOME/hermesclaw"
 
 ## Changelog
 
+### v0.4.0
+
+- **Feature: Native macOS support** — The `install.sh` script now supports macOS (`Darwin`) out-of-the-box by leveraging `launchd` instead of failing on the missing `systemctl`. It automatically creates, loads, and manages the background service via `~/Library/LaunchAgents/com.hermesclaw.plist` (Thanks [@unliftedq](https://github.com/unliftedq) for the feature request).
+
 ### v0.3.6
 
 - **Fix: macOS install failure — `mapfile: command not found`** — macOS ships with bash 3.2 which lacks the `mapfile` builtin (added in bash 4). All 3 occurrences replaced with portable `while IFS= read -r` loops, making the installer work on macOS out of the box.

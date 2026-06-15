@@ -381,10 +381,56 @@ OCEOF
             info "Created ${oc_cfg} (permission: allow)."
         fi
     fi
-    info "Installing ${SERVICE_NAME}.service."
-    cat > /tmp/hermesclaw.service <<EOF
+    OS="$(uname -s)"
+    
+    if [[ "$OS" == "Darwin" ]]; then
+        info "Installing com.${SERVICE_NAME}.plist."
+        local plist_file="${HOME}/Library/LaunchAgents/com.${SERVICE_NAME}.plist"
+        
+        # Ensure LaunchAgents directory exists
+        mkdir -p "${HOME}/Library/LaunchAgents"
+        
+        cat > /tmp/hermesclaw.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.${SERVICE_NAME}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(command -v python3)</string>
+        <string>${APP_FILE}</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${PROJECT_DIR}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>${PROJECT_DIR}/hermesclaw.err.log</string>
+    <key>StandardOutPath</key>
+    <string>${PROJECT_DIR}/hermesclaw.out.log</string>
+</dict>
+</plist>
+EOF
+        cp /tmp/hermesclaw.plist "${plist_file}"
+        rm -f /tmp/hermesclaw.plist
+        
+        # Unload if already loaded, then load
+        launchctl unload -w "${plist_file}" >/dev/null 2>&1 || true
+        launchctl load -w "${plist_file}" >/dev/null 2>&1 || {
+            err "com.${SERVICE_NAME}.plist failed to start."
+            echo "Run: launchctl print gui/$(id -u)/com.${SERVICE_NAME}"
+            exit 1
+        }
+        ok "com.${SERVICE_NAME} launchd service is running."
+    else
+        info "Installing ${SERVICE_NAME}.service."
+        cat > /tmp/hermesclaw.service <<EOF
 [Unit]
-Description=HermesClaw v3 Triple-Proxy Router
+Description=HermesClaw v4 Triple-Proxy Router
 After=network.target
 
 [Service]
@@ -404,17 +450,18 @@ ReadWritePaths=${rw_paths}
 [Install]
 WantedBy=multi-user.target
 EOF
-    sudo cp /tmp/hermesclaw.service "${SERVICE_FILE}"
-    rm -f /tmp/hermesclaw.service
-    sudo systemctl daemon-reload
-    sudo systemctl enable "${SERVICE_NAME}" >/dev/null
-    sudo systemctl restart "${SERVICE_NAME}"
-    sudo systemctl is-active "${SERVICE_NAME}" >/dev/null 2>&1 || {
-        err "${SERVICE_NAME}.service failed to start."
-        echo "Run: journalctl -u ${SERVICE_NAME} --no-pager -n 100"
-        exit 1
-    }
-    ok "${SERVICE_NAME}.service is running."
+        sudo cp /tmp/hermesclaw.service "${SERVICE_FILE}"
+        rm -f /tmp/hermesclaw.service
+        sudo systemctl daemon-reload
+        sudo systemctl enable "${SERVICE_NAME}" >/dev/null
+        sudo systemctl restart "${SERVICE_NAME}"
+        sudo systemctl is-active "${SERVICE_NAME}" >/dev/null 2>&1 || {
+            err "${SERVICE_NAME}.service failed to start."
+            echo "Run: journalctl -u ${SERVICE_NAME} --no-pager -n 100"
+            exit 1
+        }
+        ok "${SERVICE_NAME}.service is running."
+    fi
 }
 
 # ── AI-assisted install/uninstall prompt ──────────────────────────────────

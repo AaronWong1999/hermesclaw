@@ -1,4 +1,4 @@
-"""HermesClaw v3: triple-gateway proxy router for WeChat.
+"""HermesClaw v4: triple-gateway proxy router for WeChat.
 
 Takes over one iLink token, polls for messages, and distributes them
 to two independent proxy servers -- one for OpenClaw's clawbot and one
@@ -660,7 +660,7 @@ def cmd(state, uid, text, opencode_bridge=None):
     if c == "/whoami":
         route = state.get(uid)
         return (
-            f"**HermesClaw v3** by X @AaronYonW\n"
+            f"**HermesClaw v4** by X @AaronYonW\n"
             f"**Current route**: **{route_label(route)}**\n"
             f"**/hermes** → Hermes only\n"
             f"**/openclaw** → OpenClaw only\n"
@@ -1160,7 +1160,7 @@ def main():
     opencode_bridge = None
 
     log.info("=" * 60)
-    log.info("HermesClaw v3 -- triple gateway proxy")
+    log.info("HermesClaw v4 -- triple gateway proxy")
     log.info("iLink: %s", base_url)
     log.info("Hermes proxy: :%d (enabled=%s)", hermes_port, hermes_on)
     log.info("OpenClaw proxy: :%d (enabled=%s)", oc_port, oc_on)
