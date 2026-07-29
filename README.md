@@ -160,7 +160,7 @@ Also detect OpenCode CLI: run `command -v opencode` or check
 ~/.npm-global/bin/opencode.  If not found, suggest installing with:
   npm install -g opencode-ai
 Set OPENCODE_CMD in .env to the detected path (or empty if not found).
-OPENCODE_MODEL defaults to opencode/minimax-m2.5-free (free, no API key needed).
+OPENCODE_MODEL defaults to minimax/MiniMax-M3 (MiniMax API key required).
 
 If Hermes Agent WeChat gateway is detected, the installer will offer to patch
 weixin.py to disable newline-based message splitting (recommended).  Accept
