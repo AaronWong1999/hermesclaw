@@ -957,6 +957,10 @@ class TestACPSession:
 
 
 class TestOpenCodeBridge:
+    def test_default_model(self):
+        bridge = OpenCodeBridge("/nonexistent/opencode")
+        assert bridge.model == "minimax/MiniMax-M3"
+
     def test_is_available_false_when_not_found(self):
         bridge = OpenCodeBridge("/nonexistent/opencode")
         assert bridge.is_available() is False

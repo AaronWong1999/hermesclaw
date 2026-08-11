@@ -485,6 +485,7 @@ AI-assisted install prompt (paste this to an AI agent):
     npm install -g opencode-ai
   Set OPENCODE_CMD in .env to the detected path (or empty if not found).
   OPENCODE_MODEL defaults to minimax/MiniMax-M3 (MiniMax API key required).
+  Set it to minimax/MiniMax-M2.7 to use the text-only alternative.
   OPENCODE_PERMISSION_STRATEGY defaults to allow_always so headless ACP
   permission prompts do not block WeChat replies.
 
