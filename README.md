@@ -256,8 +256,8 @@ rm -rf "$HOME/hermesclaw"
 
 ## Star History
 
-<a href="https://www.star-history.com/#AaronWong1999/hermesclaw&Date">
-  <img src="https://api.star-history.com/svg?repos=AaronWong1999/hermesclaw&type=Date" alt="Star History Chart" width="600">
+<a href="https://star-history.dera.page/#AaronWong1999/hermesclaw&Date">
+  <img src="https://star-history.dera.page/svg?repos=AaronWong1999/hermesclaw&type=Date" alt="Star History Chart" width="600">
 </a>
 
 ---
