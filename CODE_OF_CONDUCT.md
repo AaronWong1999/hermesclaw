@@ -26,7 +26,7 @@ Examples of unacceptable behavior:
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainer at **aaronwong1999@icloud.com**. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainer via a GitHub Issue or the [@AaronWong1999](https://github.com/AaronWong1999) profile. All complaints will be reviewed and investigated promptly and fairly.
 
 The maintainer is obligated to respect the privacy and security of the reporter.
 

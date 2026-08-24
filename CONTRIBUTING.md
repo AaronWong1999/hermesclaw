@@ -48,7 +48,7 @@ To test locally without WeChat, mock `send_msg_ilink` and call `proc_msg(...)` d
 
 ## Reporting security issues
 
-Email **aaronwong1999@icloud.com** instead of opening a public issue.
+Open a public issue instead of emailing privately.
 
 ## Code of Conduct
 

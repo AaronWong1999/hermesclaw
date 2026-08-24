@@ -660,7 +660,7 @@ def cmd(state, uid, text, opencode_bridge=None):
     if c == "/whoami":
         route = state.get(uid)
         return (
-            f"**HermesClaw v4** by X @AaronYonW\n"
+            f"**HermesClaw v4**\n"
             f"**Current route**: **{route_label(route)}**\n"
             f"**/hermes** → Hermes only\n"
             f"**/openclaw** → OpenClaw only\n"

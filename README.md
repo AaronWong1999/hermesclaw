@@ -5,7 +5,6 @@
 **在同一个微信账号上同时多开 [Hermes Agent](https://github.com/NousResearch/hermes-agent)、[OpenClaw](https://github.com/openclaw/openclaw) 和 [OpenCode](https://github.com/sst/opencode)。一条命令安装。**
 
 <p align="center">
-  <a href="https://x.com/AaronYonW"><img src="https://img.shields.io/badge/X-%40AaronYonW-000000.svg" alt="X / Twitter"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
 </p>
 
@@ -307,7 +306,7 @@ rm -rf "$HOME/hermesclaw"
 
 ## License
 
-[MIT](LICENSE) — by [@AaronWong1999](https://github.com/AaronWong1999) · [X @AaronYonW](https://x.com/AaronYonW)
+[MIT](LICENSE) — by [@AaronWong1999](https://github.com/AaronWong1999)
 
 ---
 
