@@ -484,7 +484,8 @@ AI-assisted install prompt (paste this to an AI agent):
   ~/.npm-global/bin/opencode and ~/.opencode/bin/opencode.  If not found, suggest installing with:
     npm install -g opencode-ai
   Set OPENCODE_CMD in .env to the detected path (or empty if not found).
-  OPENCODE_MODEL defaults to opencode/minimax-m2.5-free (free, no API key).
+  OPENCODE_MODEL defaults to minimax/MiniMax-M3 (MiniMax API key required).
+  Set it to minimax/MiniMax-M2.7 to use the text-only alternative.
   OPENCODE_PERMISSION_STRATEGY defaults to allow_always so headless ACP
   permission prompts do not block WeChat replies.
 
@@ -551,7 +552,7 @@ else
     OPENCODE_CMD=""
 fi
 
-OPENCODE_MODEL="${OPENCODE_MODEL:-opencode/minimax-m2.5-free}"
+OPENCODE_MODEL="${OPENCODE_MODEL:-minimax/MiniMax-M3}"
 
 # 2) Gate: at least one gateway must be configured.
 if ! ${HAS_OC_GW} && ! ${HAS_HERMES_GW}; then

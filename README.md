@@ -25,11 +25,11 @@ Both Hermes Agent and OpenClaw now support WeChat natively — **but you can't r
 
 HermesClaw solves this by becoming the **sole iLink poller**, then running two local proxy servers (for Hermes and OpenClaw) plus a direct ACP bridge (for OpenCode). Each gateway believes it's talking to the real iLink API.
 
-The new OpenCode support also lets you **Vibe Code via WeChat voice messages** — just speak and OpenCode handles it, backed by four free models including MiniMax M2.5 Free. You can also use it alongside the other two agents to complement each other — fixing their issues, tracing bugs, or inspecting the local environment.
+The new OpenCode support also lets you **Vibe Code via WeChat voice messages** — just speak and OpenCode handles it, using MiniMax-M3 by default with MiniMax-M2.7 available through `OPENCODE_MODEL`. You can also use it alongside the other two agents to complement each other — fixing their issues, tracing bugs, or inspecting the local environment.
 
 现在 Hermes 和 OpenClaw 都原生支持微信了——**但你不能在同一个账号上双开。** 每个 Gateway 会独占 iLink 连接。HermesClaw 解决这个问题：它作为唯一的 iLink 轮询者，运行两个本地代理，让两个 Gateway 各连各的。
 
-新版还增加了 OpenCode 支持，现在你可以用微信语音直接进行 **Vibe Coding** 了，调用的就是 OpenCode 中包含 MiniMax M2.5 Free 在内的四个免费模型。你也可以用它和另外两个 Agent 互相补充使用，比如帮它们修问题、查 bug、看本机环境。
+OpenCode also enables **Vibe Coding via WeChat voice messages**, using MiniMax-M3 by default or MiniMax-M2.7 through `OPENCODE_MODEL`, and can complement the other two agents by fixing issues, tracing bugs, or inspecting the local environment.
 
 ---
 
@@ -159,7 +159,8 @@ Also detect OpenCode CLI: run `command -v opencode` or check
 ~/.npm-global/bin/opencode.  If not found, suggest installing with:
   npm install -g opencode-ai
 Set OPENCODE_CMD in .env to the detected path (or empty if not found).
-OPENCODE_MODEL defaults to opencode/minimax-m2.5-free (free, no API key needed).
+OPENCODE_MODEL defaults to minimax/MiniMax-M3 (MiniMax API key required).
+Set it to minimax/MiniMax-M2.7 to use the text-only alternative.
 
 If Hermes Agent WeChat gateway is detected, the installer will offer to patch
 weixin.py to disable newline-based message splitting (recommended).  Accept
