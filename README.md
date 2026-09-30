@@ -4,6 +4,12 @@
 
 **在同一个微信账号上同时多开 [Hermes Agent](https://github.com/NousResearch/hermes-agent)、[OpenClaw](https://github.com/openclaw/openclaw) 和 [OpenCode](https://github.com/sst/opencode)。一条命令安装。**
 
+## From the maintainer · 维护者的新项目
+
+I am also building [MuseInst](https://github.com/AaronWong1999/museinst), a separate Apache-2.0 personal-agent project whose core runs on Cloudflare Workers and Durable Objects. If you are interested in an agent with persistent memory, scheduling, email and an on-demand browser in your own Cloudflare account, its README explains the architecture and deployment requirements.
+
+我也在做 [MuseInst](https://github.com/AaronWong1999/museinst)：一个独立的 Apache-2.0 个人 Agent 项目，内核运行在 Cloudflare Workers 和 Durable Objects 上。如果你想在自己的 Cloudflare 账号里运行带长期记忆、定时任务、邮件和按需浏览器的 Agent，可以从它的 README 查看架构和部署要求。
+
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
 </p>
