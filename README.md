@@ -4,6 +4,10 @@
 
 **在同一个微信账号上同时多开 [Hermes Agent](https://github.com/NousResearch/hermes-agent)、[OpenClaw](https://github.com/openclaw/openclaw) 和 [OpenCode](https://github.com/sst/opencode)。一条命令安装。**
 
+> **New from the same author: [MuseInst](https://github.com/AaronWong1999/museinst)** — open-source personal agent infra on Cloudflare. Agent Mail, WeChat, Telegram, a cloud browser and long-term memory, without a cloud computer per user. HermesClaw keeps working as before. If MuseInst looks useful to you, a star there would mean a lot.
+>
+> **同一作者的新项目：[MuseInst](https://github.com/AaronWong1999/museinst)** —— 开源的个人 Agent 基础设施，跑在 Cloudflare 上，不用给每个用户开一台云电脑，自带 Agent Mail、微信、Telegram、云浏览器和长期记忆。HermesClaw 照常可用，不受影响。如果你觉得 MuseInst 有意思，欢迎去看看、点个 Star。
+
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
 </p>
@@ -317,3 +321,5 @@ rm -rf "$HOME/hermesclaw"
 - The Clawbot / openclaw-weixin maintainers for the iLink WeChat bridge.
 
 HermesClaw is a community bridge. It is not affiliated with NousResearch or OpenClaw.
+
+If you're running agents on WeChat, you might also like [MuseInst](https://github.com/AaronWong1999/museinst), my newer project: a personal agent per user on Cloudflare, no VM required.
