@@ -257,6 +257,14 @@ rm -rf "$HOME/hermesclaw"
 
 ---
 
+## More from the author
+
+**[MuseInst](https://github.com/AaronWong1999/museinst)** — HermesClaw answers "how do I run multiple agents on one WeChat account?" MuseInst answers the next question: **how does one personal agent live long-term without a server you have to babysit?** It is a personal agent (WeChat / Telegram / web, cloud browser, email, long-term memory) that deploys into *your own* Cloudflare account — agent state in Durable Objects, no per-user VM. Open source (Apache-2.0), early but usable. Feedback and issues welcome.
+
+**[MuseInst](https://github.com/AaronWong1999/museinst)** —— HermesClaw 回答的是"一个微信号怎么跑多个 Agent"，MuseInst 回答的是下一个问题：**一个私人 Agent 如何长期活着，而不需要你养一台服务器。** 它是一个部署在你自己 Cloudflare 账号里的个人 Agent（微信 / Telegram / 网页入口，云浏览器、邮件、长期记忆），状态放在 Durable Objects 里，不依赖每用户一台 VM。开源（Apache-2.0），早期可用，欢迎试用提 issue。
+
+---
+
 ## Star History
 
 <a href="https://www.star-history.com/#AaronWong1999/hermesclaw&Date">
