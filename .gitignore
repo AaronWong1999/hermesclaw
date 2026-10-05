@@ -23,3 +23,14 @@ hermesclaw_v1.py
 # OS
 .DS_Store
 Thumbs.db
+
+# Dependencies and build caches: never commit
+node_modules/
+.wrangler/
+.next/
+.vite/
+.turbo/
+.cache/
+venv/
+playwright-report/
+test-results/
