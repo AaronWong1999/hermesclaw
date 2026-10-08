@@ -536,7 +536,7 @@ class ACPSession:
 class OpenCodeBridge:
     """Manages per-user ACPSession instances for OpenCode integration."""
 
-    def __init__(self, opencode_cmd, model="opencode/minimax-m2.5-free",
+    def __init__(self, opencode_cmd, model="minimax/MiniMax-M3",
                  cwd=None, permission_strategy="allow_always"):
         self.opencode_cmd = opencode_cmd
         self.model = model
@@ -1135,7 +1135,7 @@ def main():
     hermes_on = os.getenv("HERMES_ENABLED", "true").lower() in ("true", "1", "yes")
     oc_on = os.getenv("OPENCLAW_ENABLED", "true").lower() in ("true", "1", "yes")
     opencode_on = os.getenv("OPENCODE_ENABLED", "true").lower() in ("true", "1", "yes")
-    opencode_model = os.getenv("OPENCODE_MODEL", "opencode/minimax-m2.5-free")
+    opencode_model = os.getenv("OPENCODE_MODEL", "minimax/MiniMax-M3")
     opencode_cmd = os.getenv("OPENCODE_CMD", "/home/ubuntu/.npm-global/bin/opencode")
     opencode_cwd = os.getenv("OPENCODE_CWD", str(Path.home()))
     opencode_permission_strategy = os.getenv("OPENCODE_PERMISSION_STRATEGY", "allow_always")

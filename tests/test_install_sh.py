@@ -44,6 +44,13 @@ def test_bash_syntax():
     )
 
 
+def test_opencode_model_targets():
+    """The installer must default to MiniMax-M3 and document MiniMax-M2.7."""
+    text = _text()
+    assert 'OPENCODE_MODEL="${OPENCODE_MODEL:-minimax/MiniMax-M3}"' in text
+    assert "minimax/MiniMax-M2.7" in text
+
+
 def test_read_guards():
     """Every interactive 'read -r -u' prompt must have a '|| VAR=""' guard."""
     for i, line in enumerate(_text().splitlines(), 1):
