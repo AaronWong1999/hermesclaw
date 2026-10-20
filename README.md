@@ -4,9 +4,9 @@
 
 **在同一个微信账号上同时多开 [Hermes Agent](https://github.com/NousResearch/hermes-agent)、[OpenClaw](https://github.com/openclaw/openclaw) 和 [OpenCode](https://github.com/sst/opencode)。一条命令安装。**
 
-> **New from the same author: [MuseInst](https://github.com/AaronWong1999/museinst)** — open-source personal agent infra on Cloudflare. Agent Mail, WeChat, Telegram, a cloud browser and long-term memory, without a cloud computer per user. HermesClaw keeps working as before. If MuseInst looks useful to you, a star there would mean a lot.
+> **New from the same author: [ccx](https://github.com/aaronwong1999/ccx)** — hit your Claude Code limit, or stuck on a bug? Hand the task to Codex with the full context, then switch back. One click in the macOS menu bar, runs locally, free and open source. HermesClaw keeps working as before. If ccx looks useful to you, a star there would mean a lot.
 >
-> **同一作者的新项目：[MuseInst](https://github.com/AaronWong1999/museinst)** —— 开源的个人 Agent 基础设施，跑在 Cloudflare 上，不用给每个用户开一台云电脑，自带 Agent Mail、微信、Telegram、云浏览器和长期记忆。HermesClaw 照常可用，不受影响。如果你觉得 MuseInst 有意思，欢迎去看看、点个 Star。
+> **同一作者的新项目：[ccx](https://github.com/aaronwong1999/ccx)** —— Claude Code 额度用完了，或者卡在某个问题上？带着完整上下文交给 Codex 接着干，搞定再切回来。macOS 菜单栏一键切换，本地运行，免费开源。HermesClaw 照常可用，不受影响。如果你觉得 ccx 有用，欢迎去看看、点个 Star。
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
@@ -322,4 +322,4 @@ rm -rf "$HOME/hermesclaw"
 
 HermesClaw is a community bridge. It is not affiliated with NousResearch or OpenClaw.
 
-If you're running agents on WeChat, you might also like [MuseInst](https://github.com/AaronWong1999/museinst), my newer project: a personal agent per user on Cloudflare, no VM required.
+If you use Claude Code and Codex, you might also like [ccx](https://github.com/aaronwong1999/ccx), my newer project: hand a task between Claude Code and Codex with the full context, so a usage limit doesn't stop your work.
