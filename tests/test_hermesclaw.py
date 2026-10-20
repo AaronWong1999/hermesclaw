@@ -654,6 +654,9 @@ class TestACPSession:
                                 "result": {"sessionId": "mock-sess-id", "configOptions": []}}
                         w.write(json.dumps(resp) + "\n")
                         w.flush()
+                    elif method == "session/set_model":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                        w.flush()
                     elif method == "session/prompt":
                         sid = msg.get("params", {}).get("sessionId", "")
                         notif = {
@@ -743,6 +746,9 @@ class TestACPSession:
                         w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
                                             "result": {"sessionId": "perm-sess", "configOptions": []}}) + "\n")
                         w.flush()
+                    elif method == "session/set_model":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                        w.flush()
                     elif method == "session/prompt":
                         prompt_id = rid
                         pending_permission = True
@@ -826,6 +832,9 @@ class TestACPSession:
                     w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
                                         "result": {"sessionId": "mock-sess", "configOptions": []}}) + "\n")
                     w.flush()
+                elif method == "session/set_model":
+                    w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                    w.flush()
                 # session/prompt: intentionally no response → timeout
 
         threading.Thread(target=_partial_server, daemon=True).start()
@@ -871,6 +880,9 @@ class TestACPSession:
                     elif method == "session/new":
                         w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
                                             "result": {"sessionId": "dying-sess", "configOptions": []}}) + "\n")
+                        w.flush()
+                    elif method == "session/set_model":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
                         w.flush()
                     elif method == "session/prompt":
                         # Simulate subprocess dying: close stdout without responding
@@ -932,6 +944,9 @@ class TestACPSession:
                         "result": {"sessionId": "timeout-sess", "configOptions": []},
                     }) + "\n")
                     w.flush()
+                elif method == "session/set_model":
+                    w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                    w.flush()
                 # session/prompt: no response — triggers timeout
 
         threading.Thread(target=_handshake_only, daemon=True).start()
@@ -959,7 +974,7 @@ class TestACPSession:
 class TestOpenCodeBridge:
     def test_default_model(self):
         bridge = OpenCodeBridge("/nonexistent/opencode")
-        assert bridge.model == "minimax/MiniMax-M3"
+        assert bridge.model == "opencode/minimax-m3.1-flash-free"
 
     def test_is_available_false_when_not_found(self):
         bridge = OpenCodeBridge("/nonexistent/opencode")

@@ -338,6 +338,14 @@ class ACPSession:
         if not r or "error" in r or "result" not in r:
             raise RuntimeError(f"ACP session/new failed: {r}")
         self.session_id = r["result"]["sessionId"]
+        # OpenCode reads the model from session state, not session/prompt.
+        r = self._send_wait("session/set_model", {
+            "sessionId": self.session_id,
+            "modelId": self.model,
+        }, timeout=15)
+        if not r or "error" in r or "result" not in r:
+            self.close()
+            raise RuntimeError(f"ACP session/set_model failed: {r}")
         self.alive = True
 
     def _read_loop(self):
@@ -493,8 +501,7 @@ class ACPSession:
         try:
             self._write_message({"jsonrpc": "2.0", "id": req_id, "method": "session/prompt",
                                  "params": {"sessionId": self.session_id,
-                                            "prompt": blocks,
-                                            "model": self.model}})
+                                            "prompt": blocks}})
         except Exception as e:
             with self._lock:
                 self._pending.pop(req_id, None)
@@ -536,7 +543,7 @@ class ACPSession:
 class OpenCodeBridge:
     """Manages per-user ACPSession instances for OpenCode integration."""
 
-    def __init__(self, opencode_cmd, model="minimax/MiniMax-M3",
+    def __init__(self, opencode_cmd, model="opencode/minimax-m3.1-flash-free",
                  cwd=None, permission_strategy="allow_always"):
         self.opencode_cmd = opencode_cmd
         self.model = model
@@ -1135,7 +1142,7 @@ def main():
     hermes_on = os.getenv("HERMES_ENABLED", "true").lower() in ("true", "1", "yes")
     oc_on = os.getenv("OPENCLAW_ENABLED", "true").lower() in ("true", "1", "yes")
     opencode_on = os.getenv("OPENCODE_ENABLED", "true").lower() in ("true", "1", "yes")
-    opencode_model = os.getenv("OPENCODE_MODEL", "minimax/MiniMax-M3")
+    opencode_model = os.getenv("OPENCODE_MODEL", "opencode/minimax-m3.1-flash-free")
     opencode_cmd = os.getenv("OPENCODE_CMD", "/home/ubuntu/.npm-global/bin/opencode")
     opencode_cwd = os.getenv("OPENCODE_CWD", str(Path.home()))
     opencode_permission_strategy = os.getenv("OPENCODE_PERMISSION_STRATEGY", "allow_always")
