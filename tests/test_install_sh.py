@@ -44,6 +44,38 @@ def test_bash_syntax():
     )
 
 
+def test_opencode_model_targets():
+    """The installer recommends the current OpenCode MiniMax routes."""
+    text = _text()
+    assert 'OPENCODE_MODEL="${OPENCODE_MODEL:-opencode/minimax-m3.1-flash-free}"' in text
+    assert "opencode/minimax-m3 for MiniMax-M3" in text
+
+
+def test_installer_preserves_saved_and_explicit_models(tmp_path):
+    """Run the actual reader/default assignment without installation side effects."""
+    import os
+
+    text = _text()
+    reader = text.split("read_env_value() {", 1)[1].split("\n}", 1)[0]
+    assignment = "\n".join(line for line in text.splitlines()
+                           if line.startswith('OPENCODE_MODEL="'))
+    saved = tmp_path / "saved.env"
+    for saved_model, explicit, expected in [
+        ("", "", "opencode/minimax-m3.1-flash-free"),
+        ("opencode/minimax-m2.5-free", "", "opencode/minimax-m2.5-free"),
+        ("minimax/MiniMax-M2.7", "", "minimax/MiniMax-M2.7"),
+        ("opencode/minimax-m3", "custom/my-model", "custom/my-model"),
+    ]:
+        saved.write_text(f"OPENCODE_MODEL={saved_model}\n")
+        result = subprocess.run(
+            ["bash", "-c", "read_env_value() {" + reader + "\n}\n" + assignment
+             + '\nprintf "%s" "$OPENCODE_MODEL"'],
+            env={"PATH": os.environ["PATH"], "ENV_FILE": str(saved), "OPENCODE_MODEL": explicit},
+            capture_output=True, text=True, check=True,
+        )
+        assert result.stdout == expected
+
+
 def test_read_guards():
     """Every interactive 'read -r -u' prompt must have a '|| VAR=""' guard."""
     for i, line in enumerate(_text().splitlines(), 1):

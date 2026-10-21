@@ -654,6 +654,9 @@ class TestACPSession:
                                 "result": {"sessionId": "mock-sess-id", "configOptions": []}}
                         w.write(json.dumps(resp) + "\n")
                         w.flush()
+                    elif method == "session/set_model":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                        w.flush()
                     elif method == "session/prompt":
                         sid = msg.get("params", {}).get("sessionId", "")
                         notif = {
@@ -705,7 +708,7 @@ class TestACPSession:
         """ACPSession initializes and creates session via mock server."""
         mock_proc, _ = self._make_mock_server()
         with patch("subprocess.Popen", return_value=mock_proc):
-            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+            sess = ACPSession("opencode", "/tmp", "minimax/MiniMax-M3")
         assert sess.session_id == "mock-sess-id"
         assert sess.alive is True
 
@@ -713,7 +716,7 @@ class TestACPSession:
         """prompt() collects agent_message_chunk text and returns it."""
         mock_proc, _ = self._make_mock_server()
         with patch("subprocess.Popen", return_value=mock_proc):
-            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+            sess = ACPSession("opencode", "/tmp", "minimax/MiniMax-M3")
         result = sess.prompt("test question")
         assert result == "hello from mock opencode"
 
@@ -742,6 +745,9 @@ class TestACPSession:
                     elif method == "session/new":
                         w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
                                             "result": {"sessionId": "perm-sess", "configOptions": []}}) + "\n")
+                        w.flush()
+                    elif method == "session/set_model":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
                         w.flush()
                     elif method == "session/prompt":
                         prompt_id = rid
@@ -793,7 +799,7 @@ class TestACPSession:
             def kill(self): pass
 
         with patch("subprocess.Popen", return_value=_PermissionProc()):
-            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+            sess = ACPSession("opencode", "/tmp", "minimax/MiniMax-M3")
         result = sess.prompt("needs permission", timeout=3)
         assert result == "permission ok"
         assert observed_permission["outcome"]["outcome"] == "selected"
@@ -826,6 +832,9 @@ class TestACPSession:
                     w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
                                         "result": {"sessionId": "mock-sess", "configOptions": []}}) + "\n")
                     w.flush()
+                elif method == "session/set_model":
+                    w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                    w.flush()
                 # session/prompt: intentionally no response → timeout
 
         threading.Thread(target=_partial_server, daemon=True).start()
@@ -839,7 +848,7 @@ class TestACPSession:
             def kill(self): pass
 
         with patch("subprocess.Popen", return_value=_TimeoutProc()):
-            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+            sess = ACPSession("opencode", "/tmp", "minimax/MiniMax-M3")
         result = sess.prompt("anything", timeout=1)
         assert "timeout" in result.lower()
 
@@ -872,6 +881,9 @@ class TestACPSession:
                         w.write(json.dumps({"jsonrpc": "2.0", "id": rid,
                                             "result": {"sessionId": "dying-sess", "configOptions": []}}) + "\n")
                         w.flush()
+                    elif method == "session/set_model":
+                        w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                        w.flush()
                     elif method == "session/prompt":
                         # Simulate subprocess dying: close stdout without responding
                         break
@@ -889,7 +901,7 @@ class TestACPSession:
             def kill(self): pass
 
         with patch("subprocess.Popen", return_value=_DyingProc()):
-            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+            sess = ACPSession("opencode", "/tmp", "minimax/MiniMax-M3")
 
         t0 = time.monotonic()
         result = sess.prompt("question", timeout=10)
@@ -932,6 +944,9 @@ class TestACPSession:
                         "result": {"sessionId": "timeout-sess", "configOptions": []},
                     }) + "\n")
                     w.flush()
+                elif method == "session/set_model":
+                    w.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}) + "\n")
+                    w.flush()
                 # session/prompt: no response — triggers timeout
 
         threading.Thread(target=_handshake_only, daemon=True).start()
@@ -945,7 +960,7 @@ class TestACPSession:
             def kill(self): pass
 
         with patch("subprocess.Popen", return_value=_NoRespProc()):
-            sess = ACPSession("opencode", "/tmp", "opencode/minimax-m2.5-free")
+            sess = ACPSession("opencode", "/tmp", "minimax/MiniMax-M3")
 
         assert sess.alive is True
         result = sess.prompt_blocks([{"type": "text", "text": "hi"}], timeout=1)
@@ -957,6 +972,10 @@ class TestACPSession:
 
 
 class TestOpenCodeBridge:
+    def test_default_model(self):
+        bridge = OpenCodeBridge("/nonexistent/opencode")
+        assert bridge.model == "opencode/minimax-m3.1-flash-free"
+
     def test_is_available_false_when_not_found(self):
         bridge = OpenCodeBridge("/nonexistent/opencode")
         assert bridge.is_available() is False
